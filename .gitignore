@@ -73,3 +73,14 @@ tests/
 # TacSL sensor
 **/tactile_record/*
 **/gelsight_r15_data/*
+
+# Local-only agent/plan notes (Codex guardrails)
+AGENTS.md
+MASTER_PLAN.md
+STATUS.md
+
+# Stage1 experiment artifacts policy:
+# - keep raw logs untracked
+# - keep summarized markdown/csv/png tracked
+logs/
+

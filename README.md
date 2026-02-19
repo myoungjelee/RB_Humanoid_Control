@@ -1,135 +1,110 @@
-# Template for Isaac Lab Projects
+# RB_Humanoid_Control
 
-## Overview
+Humanoid / Legged Robot Control Validation Project
+Isaac Sim + IsaacLab 기반 휴머노이드 제어 시스템 검증 프로젝트
 
-This project/repository serves as a template for building projects or extensions based on Isaac Lab.
-It allows you to develop in an isolated environment, outside of the core Isaac Lab repository.
+## Project Goal
 
-**Key Features:**
+본 프로젝트는 휴머노이드 로봇의 제어 성능 자체를 과시하기보다,
 
-- `Isolation` Work outside the core Isaac Lab repository, ensuring that your development efforts remain self-contained.
-- `Flexibility` This template is set up to allow your code to be run as an extension in Omniverse.
+**센서 -> 상태 -> 명령 -> 액션 -> 종료 조건**
 
-**Keywords:** extension, template, isaaclab
+전체 실행 경로를 재현 및 검증하는 것을 목표로 합니다.
 
-## Installation
+강화학습 성능 경쟁이 아니라, 시스템 검증 능력과 실험 설계 역량을
+재현 가능한 로그/요약/리포트로 증명하는 데 초점을 둡니다.
 
-- Install Isaac Lab by following the [installation guide](https://isaac-sim.github.io/IsaacLab/main/source/setup/installation/index.html).
-  We recommend using the conda or uv installation as it simplifies calling Python scripts from the terminal.
+## Stage 1: Stand-Only Validation
 
-- Clone or copy this project/repository separately from the Isaac Lab installation (i.e. outside the `IsaacLab` directory):
+### 목적
 
-- Using a python interpreter that has Isaac Lab installed, install the library in editable mode using:
+- velocity command를 0으로 고정한 stand-only 환경에서 실행 안정성을 검증
+- zero-action baseline을 통해 실패 시점을 확인
+- pose-hold baseline 비교를 위한 기준선 확보
 
-    ```bash
-    # use 'PATH_TO_isaaclab.sh|bat -p' instead of 'python' if Isaac Lab is not installed in Python venv or conda
-    python -m pip install -e source/RB_Humanoid_Control
+### 실험 구성
 
-- Verify that the extension is correctly installed by:
+- task
+  - `RB-Stage1-G1-Flat-Stand-v0`
+  - `RB-Stage1-G1-Rough-Stand-v0`
+- `num_envs=1`
+- `steps=200`
+- device: `cuda`
+- command: `velocity=[0, 0, 0]`
 
-    - Listing the available tasks:
+### Stage1-1: Validity Check
 
-        Note: It the task name changes, it may be necessary to update the search pattern `"Template-"`
-        (in the `scripts/list_envs.py` file) so that it can be listed.
+- `velocity_commands == [0.0, 0.0, 0.0]` 확인
+- `reset/step` 루프 정상 동작 확인
+- termination 처리 동작 확인
+  - 기본값: 첫 done에서 종료 (`--reset_on_done` 미사용)
+  - 옵션: done마다 reset 후 계속 (`--reset_on_done`)
 
-        ```bash
-        # use 'FULL_PATH_TO_isaaclab.sh|bat -p' instead of 'python' if Isaac Lab is not installed in Python venv or conda
-        python scripts/list_envs.py
-        ```
+### Stage1-2: Zero-Action Baseline (현재 결과)
 
-    - Running a task:
+- action: `0`
+- 목적: 관절 제어 없이 시스템이 언제 종료되는지 측정
 
-        ```bash
-        # use 'FULL_PATH_TO_isaaclab.sh|bat -p' instead of 'python' if Isaac Lab is not installed in Python venv or conda
-        python scripts/<RL_LIBRARY>/train.py --task=<TASK_NAME>
-        ```
+| Task | Mode | first_done_step | first_done_reason | status |
+| --- | --- | --- | --- | --- |
+| Flat | zero | 67 | unknown | stopped_on_first_done |
+| Rough | zero | 67 | unknown | stopped_on_first_done |
 
-    - Running a task with dummy agents:
+해석:
+- 제어가 없으면 stand-only 환경에서 빠르게 종료됨
+- 실행 경로(명령 입력/step/termination)는 정상적으로 작동함
+- done 원인은 현재 `unknown`으로 기록되어 원인 세분화가 다음 과제임
 
-        These include dummy agents that output zero or random agents. They are useful to ensure that the environments are configured correctly.
-
-        - Zero-action agent
-
-            ```bash
-            # use 'FULL_PATH_TO_isaaclab.sh|bat -p' instead of 'python' if Isaac Lab is not installed in Python venv or conda
-            python scripts/zero_agent.py --task=<TASK_NAME>
-            ```
-        - Random-action agent
-
-            ```bash
-            # use 'FULL_PATH_TO_isaaclab.sh|bat -p' instead of 'python' if Isaac Lab is not installed in Python venv or conda
-            python scripts/random_agent.py --task=<TASK_NAME>
-            ```
-
-### Set up IDE (Optional)
-
-To setup the IDE, please follow these instructions:
-
-- Run VSCode Tasks, by pressing `Ctrl+Shift+P`, selecting `Tasks: Run Task` and running the `setup_python_env` in the drop down menu.
-  When running this task, you will be prompted to add the absolute path to your Isaac Sim installation.
-
-If everything executes correctly, it should create a file .python.env in the `.vscode` directory.
-The file contains the python paths to all the extensions provided by Isaac Sim and Omniverse.
-This helps in indexing all the python modules for intelligent suggestions while writing code.
-
-### Setup as Omniverse Extension (Optional)
-
-We provide an example UI extension that will load upon enabling your extension defined in `source/RB_Humanoid_Control/RB_Humanoid_Control/ui_extension_example.py`.
-
-To enable your extension, follow these steps:
-
-1. **Add the search path of this project/repository** to the extension manager:
-    - Navigate to the extension manager using `Window` -> `Extensions`.
-    - Click on the **Hamburger Icon**, then go to `Settings`.
-    - In the `Extension Search Paths`, enter the absolute path to the `source` directory of this project/repository.
-    - If not already present, in the `Extension Search Paths`, enter the path that leads to Isaac Lab's extension directory directory (`IsaacLab/source`)
-    - Click on the **Hamburger Icon**, then click `Refresh`.
-
-2. **Search and enable your extension**:
-    - Find your extension under the `Third Party` category.
-    - Toggle it to enable your extension.
-
-## Code formatting
-
-We have a pre-commit template to automatically format your code.
-To install pre-commit:
+## Reproduction
 
 ```bash
-pip install pre-commit
+python scripts/stage1/run_stage1.py --task flat --mode zero --num_envs 1 --steps 200
+python scripts/stage1/run_stage1.py --task rough --mode zero --num_envs 1 --steps 200
 ```
 
-Then you can run pre-commit with:
+Artifacts:
+- Raw log: `logs/stage1/raw/`
+- Summary: `logs/stage1/summary/`
+- Human report: `reports/stage1/overview.md`
 
-```bash
-pre-commit run --all-files
+## Next Step
+
+- pose-hold baseline 추가 및 zero 대비 비교
+- termination reason 정밀 분석
+- 외란(초기 자세 랜덤, small disturbance) 검증
+
+## Tech Stack
+
+- Isaac Sim 5.x
+- IsaacLab (source build)
+- PyTorch (CUDA)
+- Gymnasium
+
+## Project Structure
+
+```text
+scripts/
+  stage1/
+    run_stage1.py
+
+rb_utils/
+  __init__.py
+  experiment.py
+  rollout_runner.py
+  summary_writer.py
+  termination_utils.py
+
+logs/
+  stage1/
+    raw/
+    summary/
+
+reports/
+  stage1/
+    overview.md
 ```
 
-## Troubleshooting
+## Note
 
-### Pylance Missing Indexing of Extensions
-
-In some VsCode versions, the indexing of part of the extensions is missing.
-In this case, add the path to your extension in `.vscode/settings.json` under the key `"python.analysis.extraPaths"`.
-
-```json
-{
-    "python.analysis.extraPaths": [
-        "<path-to-ext-repo>/source/RB_Humanoid_Control"
-    ]
-}
-```
-
-### Pylance Crash
-
-If you encounter a crash in `pylance`, it is probable that too many files are indexed and you run out of memory.
-A possible solution is to exclude some of omniverse packages that are not used in your project.
-To do so, modify `.vscode/settings.json` and comment out packages under the key `"python.analysis.extraPaths"`
-Some examples of packages that can likely be excluded are:
-
-```json
-"<path-to-isaac-sim>/extscache/omni.anim.*"         // Animation packages
-"<path-to-isaac-sim>/extscache/omni.kit.*"          // Kit UI tools
-"<path-to-isaac-sim>/extscache/omni.graph.*"        // Graph UI tools
-"<path-to-isaac-sim>/extscache/omni.services.*"     // Services tools
-...
-```
+본 프로젝트는 Stage 1 기준으로 시스템 검증 중심입니다.
+RL 학습, ROS2 통합, locomotion 확장은 Stage 1 범위 밖으로 분리해 관리합니다.
