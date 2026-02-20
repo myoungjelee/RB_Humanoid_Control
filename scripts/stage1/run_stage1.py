@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Stage1 runner (zero/pose modes)."""
+"""Stage1 실행 스크립트 (zero/pose 모드)."""
 
 from __future__ import annotations
 
@@ -17,16 +17,16 @@ from rb_utils.experiment import (
     attach_kit_log_file,
     ensure_stage_dirs,
     make_run_id,
-    safe_git_commit,
     set_kit_log_dir_env,
 )
-from rb_utils.rollout_runner import extract_policy_obs, get_unwrapped_num_envs, run_rollout
+from rb_utils.action_generators import extract_policy_obs, make_actions
+from rb_utils.experiment_runner import get_unwrapped_num_envs, run_rollout
 from rb_utils.summary_writer import print_run_meta, write_stage_summary
 
 RAW_LOG_DIR, SUMMARY_DIR = ensure_stage_dirs(PROJECT_ROOT, "stage1")
 set_kit_log_dir_env(RAW_LOG_DIR)
 
-parser = argparse.ArgumentParser(description="Stage1 rollout script.")
+parser = argparse.ArgumentParser(description="Stage1 롤아웃 실행 스크립트.")
 parser.add_argument("--task", choices=["flat", "rough"], default="flat")
 parser.add_argument("--mode", choices=["zero", "pose"], default="zero")
 parser.add_argument("--num_envs", type=int, default=1)
@@ -36,19 +36,21 @@ parser.add_argument(
     "--reset_on_done",
     action="store_true",
     default=False,
-    help="If set, keep running by resetting after done. Default is to stop on first done.",
+    help="설정 시 done 이후 reset하고 계속 실행. 기본값은 첫 done에서 종료.",
 )
 AppLauncher.add_app_launcher_args(parser)
 args_cli = parser.parse_args()
 
 
 def _task_id(short_name: str) -> str:
+    """짧은 태스크 이름(flat/rough)을 IsaacLab env id로 변환한다."""
     if short_name == "flat":
         return "RB-Stage1-G1-Flat-Stand-v0"
     return "RB-Stage1-G1-Rough-Stand-v0"
 
 
 def main():
+    """Stage1 실험 1회를 실행하고 요약 파일을 생성한다."""
     import gymnasium as gym
 
     env_id = _task_id(args_cli.task)
@@ -71,7 +73,6 @@ def main():
         "fabric": str(not args_cli.disable_fabric),
         "reset_on_done": str(args_cli.reset_on_done),
         "isaaclab_version": "unknown",
-        "git_commit": safe_git_commit(PROJECT_ROOT),
     }
     run_stats: dict[str, str] = {
         "status": "failed_before_run",
@@ -86,7 +87,7 @@ def main():
     summary_written = False
 
     try:
-        # IMPORTANT: Isaac/Omniverse modules must be imported after SimulationApp launch.
+        # 중요: Isaac/Omniverse 모듈은 SimulationApp 실행 이후에 import 해야 한다.
         import isaaclab
         import isaaclab_tasks  # noqa: F401
         from isaaclab_tasks.utils import parse_env_cfg
@@ -115,7 +116,6 @@ def main():
             "fabric": str(not args_cli.disable_fabric),
             "reset_on_done": str(args_cli.reset_on_done),
             "isaaclab_version": getattr(isaaclab, "__version__", "unknown"),
-            "git_commit": safe_git_commit(PROJECT_ROOT),
         }
         print_run_meta(run_meta)
 
@@ -134,6 +134,7 @@ def main():
             reset_on_done=args_cli.reset_on_done,
             initial_obs=obs,
             initial_info=info,
+            action_fn=make_actions,
         )
         env.close()
         print("[OK] finish", flush=True)
@@ -163,6 +164,10 @@ def main():
             "avg_reward_per_step": f"{stats_raw['avg_reward_per_step']:.6f}",
             "elapsed_s": f"{stats_raw['elapsed_s']:.3f}",
             "first_done_reason": str(stats_raw["first_done_reason"]),
+            "first_done_flags": str(stats_raw["first_done_flags"]),
+            "first_done_terms": str(stats_raw["first_done_terms"]),
+            "first_done_state": str(stats_raw["first_done_state"]),
+            "first_done_info": str(stats_raw["first_done_info"]),
             "interpretation": interpretation,
         }
         write_stage_summary(summary_file, run_id, raw_log_file, run_meta, run_stats)
@@ -193,4 +198,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
