@@ -1,82 +1,94 @@
 # RB_Humanoid_Control
 
-Humanoid / Legged Robot Control Validation Project
-Isaac Sim + IsaacLab 기반 휴머노이드 제어 시스템 검증 프로젝트
+Humanoid control validation portfolio with two tracks:
+- Main: ROS2 Sim-to-Real (`ros2_ws/`)
+- Baseline: IsaacLab Stage1 stand validation (`scripts/stage1/`)
 
-## Project Goal
+## Project Direction
 
-본 프로젝트는 휴머노이드 로봇의 제어 성능 자체를 과시하기보다,
+핵심 목표는 제어 단일 실험을 넘어서,
+**센서 -> 추정 -> 제어 -> 안전 -> 로깅/리포트** 전체 경로를
+Sim과 Real에서 재사용 가능한 인터페이스로 정리하는 것입니다.
 
-**센서 -> 상태 -> 명령 -> 액션 -> 종료 조건**
+- 메인트랙: ROS2 Sim-to-Real 아키텍처 구축
+- 베이스라인: Stage1 실험 자산은 기준선으로 유지
 
-전체 실행 경로를 재현 및 검증하는 것을 목표로 합니다.
+## Track A: ROS2 Sim-to-Real (Main)
 
-강화학습 성능 경쟁이 아니라, 시스템 검증 능력과 실험 설계 역량을
-재현 가능한 로그/요약/리포트로 증명하는 데 초점을 둡니다.
+현재는 M0/M1(인터페이스 고정, 센서 토픽 파이프라인) 단계 기준으로 진행합니다.
 
-## Stage 1: Stand-Only Validation
+- 목표 산출물
+  - `reports/sim2real/overview.md`
+  - `reports/sim2real/ONE_PAGER.md`
+  - `logs/sim2real/<timestamp>/`
+- 핵심 노드(계획)
+  - `rb_state_estimator`
+  - `rb_controller`
+  - `rb_safety_monitor`
+  - `rb_kpi_logger`
 
-### 목적
+## Track B: Stage1 Baseline (Frozen Evidence)
 
-- velocity command를 0으로 고정한 stand-only 환경에서 실행 안정성을 검증
-- zero-action baseline을 통해 실패 시점을 확인
-- pose-hold baseline 비교를 위한 기준선 확보
-
-### 실험 구성
+Stage1은 stand-only 기준선을 고정해두는 트랙입니다.
 
 - task
   - `RB-Stage1-G1-Flat-Stand-v0`
   - `RB-Stage1-G1-Rough-Stand-v0`
-- `num_envs=1`
-- `steps=200`
-- device: `cuda`
-- command: `velocity=[0, 0, 0]`
+- 조건
+  - `num_envs=1`
+  - `steps=200`
+  - velocity command = `[0, 0, 0]`
 
-### Stage1-1: Validity Check
+현재 baseline 결과(Zero mode):
 
-- `velocity_commands == [0.0, 0.0, 0.0]` 확인
-- `reset/step` 루프 정상 동작 확인
-- termination 처리 동작 확인
-  - 기본값: 첫 done에서 종료 (`--reset_on_done` 미사용)
-  - 옵션: done마다 reset 후 계속 (`--reset_on_done`)
+| Terrain | Mode | first_done_step | first_done_reason |
+| --- | --- | ---: | --- |
+| Flat | zero | 67 | base_contact |
+| Rough | zero | 67 | base_contact |
 
-### Stage1-2: Zero-Action Baseline (현재 결과)
-
-- action: `0`
-- 목적: 관절 제어 없이 시스템이 언제 종료되는지 측정
-
-| Task | Mode | first_done_step | first_done_reason | status |
-| --- | --- | --- | --- | --- |
-| Flat | zero | 67 | unknown | stopped_on_first_done |
-| Rough | zero | 67 | unknown | stopped_on_first_done |
-
-해석:
-- 제어가 없으면 stand-only 환경에서 빠르게 종료됨
-- 실행 경로(명령 입력/step/termination)는 정상적으로 작동함
-- done 원인은 현재 `unknown`으로 기록되어 원인 세분화가 다음 과제임
-
-## Reproduction
+## Reproduction (Stage1 Baseline)
 
 ```bash
 python scripts/stage1/run_stage1.py --task flat --mode zero --num_envs 1 --steps 200
 python scripts/stage1/run_stage1.py --task rough --mode zero --num_envs 1 --steps 200
+python scripts/stage1/run_stage1.py --task flat --mode pose --num_envs 1 --steps 200
+python scripts/stage1/run_stage1.py --task rough --mode pose --num_envs 1 --steps 200
 ```
 
-Artifacts:
-- Raw log: `logs/stage1/raw/`
-- Summary: `logs/stage1/summary/`
-- Human report: `reports/stage1/overview.md`
+## Reports
 
-## Next Step
+- Sim-to-Real
+  - `reports/sim2real/overview.md`
+  - `reports/sim2real/ONE_PAGER.md`
+- Stage1 Baseline
+  - `reports/stage1/overview.md`
+  - `reports/stage1/ONE_PAGER.md`
 
-- pose-hold baseline 추가 및 zero 대비 비교
-- termination reason 정밀 분석
-- 외란(초기 자세 랜덤, small disturbance) 검증
+## Artifacts
+
+- Stage1 raw log: `logs/stage1/raw/`
+- Stage1 summary: `logs/stage1/summary/`
+- Stage1 videos: `logs/stage1/videos/`
+- Stage1 figures/images: `reports/stage1/figures/`, `reports/stage1/images/`
+- Sim2Real raw/summary: `logs/sim2real/raw/`, `logs/sim2real/summary/`
+
+## ROS2 Tracking Policy
+
+- Track(커밋):
+  - `ros2_ws/src/**` (노드/패키지 소스)
+  - `launch/`, `config/`, `package.xml`, `CMakeLists.txt`, `setup.py`
+  - `reports/sim2real/**` (요약 문서/그림)
+- Untrack(커밋 안 함):
+  - `ros2_ws/build/`, `ros2_ws/install/`, `ros2_ws/log/`
+  - 대용량 실행 산출물(`logs/**`, rosbag raw 데이터)
+
+원칙: 실행 산출물은 `logs/`에 남기고, 공유용 결과만 `reports/`로 정리한다.
 
 ## Tech Stack
 
 - Isaac Sim 5.x
 - IsaacLab (source build)
+- ROS2 (Sim-to-Real track)
 - PyTorch (CUDA)
 - Gymnasium
 
@@ -88,7 +100,6 @@ scripts/
     run_stage1.py
 
 rb_utils/
-  __init__.py
   action_generators.py
   experiment.py
   experiment_runner.py
@@ -99,13 +110,15 @@ logs/
   stage1/
     raw/
     summary/
+    videos/
 
 reports/
-  stage1/
+  sim2real/
+    ONE_PAGER.md
     overview.md
+  stage1/
+    ONE_PAGER.md
+    overview.md
+    figures/
+    images/
 ```
-
-## Note
-
-본 프로젝트는 Stage 1 기준으로 시스템 검증 중심입니다.
-RL 학습, ROS2 통합, locomotion 확장은 Stage 1 범위 밖으로 분리해 관리합니다.

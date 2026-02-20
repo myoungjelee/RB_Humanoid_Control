@@ -78,9 +78,14 @@ tests/
 AGENTS.md
 MASTER_PLAN.md
 STATUS.md
+ROS2_SIM2REAL_STARTER_GUIDE.md
 
 # Stage1 experiment artifacts policy:
 # - keep raw logs untracked
 # - keep summarized markdown/csv/png tracked
 logs/
 
+# ROS2 colcon build artifacts
+ros2_ws/build/
+ros2_ws/install/
+ros2_ws/log/

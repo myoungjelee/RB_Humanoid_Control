@@ -1,57 +1,73 @@
-# Stage 1 Overview — G1 Stand-Only Validation
+# Stage1 Overview — Stand-Only Validation (G1 / IsaacLab)
 
-## 목적
-Stand-only 조건(`velocity_commands = 0`)에서 G1의 baseline 안정성을 검증한다.
-Stage1에서는 `zero-action`과 `pose-hold`를 비교해, 서기 안정성 검증의 출발점을 만든다.
+## 1) 목적
+Stage1은 stand-only(velocity command=0) 조건에서 `zero` 기준선을 확정하고,
+termination/failure mode를 재현 가능하게 기록하는 검증 단계다.
 
-## 실험 조건
-| 항목 | 값 |
-|---|---|
-| Tasks | `RB-Stage1-G1-Flat-Stand-v0`, `RB-Stage1-G1-Rough-Stand-v0` |
-| Modes | `zero`, `pose` |
-| Steps | `200` |
-| num_envs | `1` |
-| device | `cuda:0` |
-| fabric | `True` |
+## 2) 실행 환경(재현 정보)
+- Repo: `RB_Humanoid_Control`
+- IsaacLab: `0.54.3`
+- Device: `cuda:0`
+- Task IDs:
+  - Flat: `RB-Stage1-G1-Flat-Stand-v0`
+  - Rough: `RB-Stage1-G1-Rough-Stand-v0`
+- Steps: `200`
+- num_envs: `1`
+- Runner: `scripts/stage1/run_stage1.py`
+- Summary output: `logs/stage1/summary/*_summary.md`
+- Raw kit log: `logs/stage1/raw/*.log`
 
-## 조건 유효성 확인
-- Flat: `velocity_commands[0] = [0.0, 0.0, 0.0]` 확인
-- Rough: `velocity_commands[0] = [0.0, 0.0, 0.0]` 확인
+## 3) 결과 요약(표)
+| Terrain | Mode | executed_steps | first_done_step | first_done_reason | first_done_terms |
+|---|---|---:|---:|---|---|
+| Flat | zero | 67 | 67 | base_contact | base_contact |
+| Rough | zero | 67 | 67 | base_contact | base_contact |
+| Flat | pose | pending | pending | pending | pending |
+| Rough | pose | pending | pending | pending | pending |
 
-## 핵심 결과
-### Zero Baseline Result (Stage1)
-| Terrain | Mode | First Done Step | Reason | First Done Terms |
-|---|---|---:|---|---|
-| Flat | zero | 67 | base_contact | base_contact |
-| Rough | zero | 67 | base_contact | base_contact |
+### 3.1 한 줄 해석
+- `zero`는 Flat/Rough 모두 67 step에서 `base_contact`로 종료되어 uncontrolled stability baseline이 고정됐다.
+- 이 baseline은 이후 `pose-hold`, gain sweep, frequency sweep 비교의 기준점으로 사용한다.
 
-Sources (2026-02-20):
-- `logs/stage1/summary/flat_zero_s200_20260220-095532_summary.md`
-- `logs/stage1/summary/rough_zero_s200_20260220-095840_summary.md`
+## 4) 아티팩트(링크 허브)
+### 4.1 Summary
+- Flat zero: `logs/stage1/summary/flat_zero_s200_20260220-121311_summary.md`
+- Rough zero: `logs/stage1/summary/rough_zero_s200_20260220-121937_summary.md`
 
-### Pose-hold
-| Task | Mode | first_done | reason |
-|---|---|---:|---|
-| Flat | pose | pending | pending |
-| Rough | pose | pending | pending |
+### 4.2 Videos
+- `logs/stage1/videos/flat_zero_trim.mp4`
+- `logs/stage1/videos/rough_zero_trim.mp4`
 
-## 해석
-- Zero-action은 Flat/Rough 모두 67 step에서 첫 종료가 발생했다.
-- 종료 원인은 두 지형 모두 `base_contact`로 일치하며, 무제어 상태의 안정성 한계가 동일하게 드러났다.
-- 제어 입력이 0이므로 자세 유지 토크가 없어, 중력/접촉 동역학 하에서 빠르게 넘어지는 baseline으로 해석할 수 있다.
-- Zero-action baseline failed at step 67 on both flat and rough terrains due to torso ground contact (`base_contact`).
-- This result defines the uncontrolled stability limit and serves as the fixed reference for subsequent pose-hold and gain-sweep experiments.
-- Pose-hold는 동일 조건에서 zero-action 대비 생존 step이 증가할 것으로 예상한다(명시적 자세 유지 제어가 들어가기 때문).
+### 4.3 Images
+- `reports/stage1/images/flat_zero.png`
+- `reports/stage1/images/rough_zero.png`
 
-## 다음 단계
-1. Pose-hold(Flat/Rough) 실행 후 결과표 채우기.
-2. termination reason(`base_contact`, `time_out` 등) 추적 정확도 보강.
-3. Stage1 필수 3개 실험 스크립트(`freq/pd/disturbance`)로 확장.
+### 4.4 Figures (pending)
+- `reports/stage1/figures/pd_sweep.png`
+- `reports/stage1/figures/freq_sweep.png`
 
-## 재현
+## 5) 실험 설계 노트
+- Mode 정의:
+  - `zero`: action=0
+  - `pose`: pose-hold action (구현 완료, 결과 취합 전)
+- Termination:
+  - `base_contact` (torso_link contact)
+- 측정 지표:
+  - `executed_steps`
+  - `first_done_step`
+  - `first_done_reason`
+  - `first_done_terms`
+  - `avg_reward_per_step`
+
+## 6) 재현 커맨드
 ```bash
-python scripts/stage1/run_stage1.py --task flat --mode zero --steps 200 --headless
-python scripts/stage1/run_stage1.py --task rough --mode zero --steps 200 --headless
-python scripts/stage1/run_stage1.py --task flat --mode pose --steps 200 --headless
-python scripts/stage1/run_stage1.py --task rough --mode pose --steps 200 --headless
+python scripts/stage1/run_stage1.py --task flat --mode zero --steps 200
+python scripts/stage1/run_stage1.py --task rough --mode zero --steps 200
+python scripts/stage1/run_stage1.py --task flat --mode pose --steps 200
+python scripts/stage1/run_stage1.py --task rough --mode pose --steps 200
 ```
+
+## 7) 다음 단계
+1. pose-hold(Flat/Rough) 결과를 동일 표에 채워 zero 대비 개선폭 확정.
+2. PD/frequency sweep 스크립트 결과를 `reports/stage1/figures/`에 연결.
+3. disturbance recovery 결과까지 추가해 Stage1 패키지 완성.
