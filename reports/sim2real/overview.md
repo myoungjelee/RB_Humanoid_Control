@@ -5,7 +5,7 @@
 Stage1(`reports/stage1/*`)은 baseline 증거로 유지하고, 본 문서는 메인트랙 결과를 기록한다.
 
 ## 2) 현재 단계
-- 상태: M0 완료, M1 완료, M2 진행 준비
+- 상태: M0 완료, M1 완료, M2 완료, M3 진행 준비
 - 기준 문서:
   - `AGENTS.md`
   - `MASTER_PLAN.md`
@@ -29,12 +29,17 @@ Stage1(`reports/stage1/*`)은 baseline 증거로 유지하고, 본 문서는 메
 - 증빙 이미지: `reports/sim2real/images/m1.png`
 - 저장 stage: `sim/isaac_scenes/g1_stage.usd`
 
-## 5) 다음 검증 항목(M2)
-- `rb_controller` C++ 패키지 생성/빌드
-- 0 torque publish(`/rb/command_raw`)
-- dt/jitter 통계 출력(`dt_mean/dt_max/p95/miss_count`)
+## 5) 완료 항목(M2)
+- `rb_controller` C++ 패키지 생성/빌드 완료
+- 0 torque publish(`/rb/command_raw`) 확인
+- dt/jitter 통계 출력(`dt_mean/dt_max/p95/miss_count`) 확인
+- 증빙 이미지: `reports/sim2real/images/m2_controller.png`
 
-## 6) 아티팩트 경로
+## 6) 다음 검증 항목(M3)
+- `/rb/command` -> Isaac articulation 적용 연결
+- 입력 -> 출력 -> 물리 반영 루프 검증
+
+## 7) 아티팩트 경로
 - 실행 로그: `logs/sim2real/<timestamp>/`
 - 요약 리포트: `reports/sim2real/overview.md`
 - one-pager: `reports/sim2real/ONE_PAGER.md`

@@ -34,6 +34,7 @@ Isaac Sim (ROS2 Bridge)
 - Sim2Real overview: `reports/sim2real/overview.md`
 - Sim2Real one-pager: `reports/sim2real/ONE_PAGER.md`
 - M1 proof image: `reports/sim2real/images/m1.png`
+- M2 proof image: `reports/sim2real/images/m2_controller.png`
 - Saved stage USD: `sim/isaac_scenes/g1_stage.usd`
 - Stage1 overview: `reports/stage1/overview.md`
 - Stage1 one-pager: `reports/stage1/ONE_PAGER.md`
@@ -43,15 +44,18 @@ Isaac Sim (ROS2 Bridge)
 ## M1 Snapshot
 ![M1 Topic Proof](reports/sim2real/images/m1.png)
 
-## Current Progress (2026-02-25)
+## M2 Snapshot
+![M2 Controller Proof](reports/sim2real/images/m2_controller.png)
+
+## Current Progress (2026-03-02)
 - M0 Decision Lock: complete
-- Active sprint: M1 -> M2
+- M1 Sensor Pipeline: complete
+- M2 C++ Controller Skeleton: complete
+- Active sprint: M3
 - Re-apply gate: M6 complete
 - Re-apply deadline target: 2026-03-26
 
 ## Next Milestones
-- M1: sensor pipeline evidence (`/clock`, `/rb/joint_states`, `/rb/imu`)
-- M2: C++ controller skeleton + dt/jitter telemetry
 - M3: command apply to Isaac articulation
 - M4: safety integration
 - M5: stand stabilization (20~30s)
