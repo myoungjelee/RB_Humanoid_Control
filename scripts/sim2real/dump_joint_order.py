@@ -28,8 +28,12 @@ class JointOrderCapture(Node):
         if not msg.name:
             self.get_logger().warn("Received JointState with empty name[]; waiting.")
             return
-        self.joint_names = list(msg.name)
-        self.get_logger().info(f"Captured {len(self.joint_names)} joints.")
+        cleaned_names = [str(name).strip() for name in msg.name]
+        if any(not name for name in cleaned_names):
+            self.get_logger().warn("Received JointState with blank joint names; waiting for valid sample.")
+            return
+        self.joint_names = cleaned_names
+        self.get_logger().info(f"Captured {len(self.joint_names)} joints with valid names.")
 
 
 def _write_joint_order_yaml(path: Path, topic: str, joint_names: list[str]) -> None:
@@ -66,18 +70,30 @@ def main() -> int:
     node = JointOrderCapture(args.topic)
     deadline = time.monotonic() + args.timeout_sec
 
+    interrupted = False
     try:
         while rclpy.ok() and node.joint_names is None and time.monotonic() < deadline:
             rclpy.spin_once(node, timeout_sec=0.2)
+    except KeyboardInterrupt:
+        interrupted = True
     finally:
         node.destroy_node()
-        rclpy.shutdown()
+        # Ctrl+C나 외부 signal로 이미 shutdown 된 경우를 안전하게 처리
+        try:
+            if rclpy.ok():
+                rclpy.shutdown()
+        except Exception:
+            pass
+
+    if interrupted:
+        print("[INFO] Interrupted by user.", file=sys.stderr)
+        return 130
 
     if node.joint_names is None:
         print(
             (
                 f"[ERROR] Timed out after {args.timeout_sec:.1f}s waiting for "
-                f"{args.topic}. Check ROS2 Bridge and topic remap."
+                f"{args.topic}. Check ROS2 Bridge and whether JointState.name[] is populated."
             ),
             file=sys.stderr,
         )

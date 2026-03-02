@@ -128,14 +128,17 @@ def build_m1_sensor_graph(env: Any, phase_cfg: dict[str, Any]) -> tuple[bool, st
         tick_node_type = "isaacsim.core.nodes.OnPhysicsStep"
         tick_output_port = "outputs:step"
         evaluator_name = "push"
+        use_on_demand_pipeline = True
     elif tick_source == "on_tick":
         tick_node_type = "omni.graph.action.OnTick"
         tick_output_port = "outputs:tick"
         evaluator_name = "execution"
+        use_on_demand_pipeline = False
     else:
         tick_node_type = "omni.graph.action.OnPlaybackTick"
         tick_output_port = "outputs:tick"
         evaluator_name = "execution"
+        use_on_demand_pipeline = False
     tick_only_playback = bool(graph_cfg.get("tick_only_playback", False))
     tick_frame_period = int(graph_cfg.get("tick_frame_period", 0))
 
@@ -157,9 +160,16 @@ def build_m1_sensor_graph(env: Any, phase_cfg: dict[str, Any]) -> tuple[bool, st
         robot_prim = _resolve_robot_prim(env, graph_cfg.get("robot_prim"))
         keys = og.Controller.Keys
 
+        graph_spec: dict[str, Any] = {
+            "graph_path": graph_path,
+            "evaluator_name": evaluator_name,
+        }
+        if use_on_demand_pipeline:
+            graph_spec["pipeline_stage"] = og.GraphPipelineStage.GRAPH_PIPELINE_STAGE_ONDEMAND
+
         # 그래프 생성 + 노드 연결 + 기본 값 세팅
         (graph, _, _, _) = og.Controller.edit(
-            {"graph_path": graph_path, "evaluator_name": evaluator_name},
+            graph_spec,
             {
                 keys.CREATE_NODES: [
                     ("Tick", tick_node_type),
@@ -178,6 +188,7 @@ def build_m1_sensor_graph(env: Any, phase_cfg: dict[str, Any]) -> tuple[bool, st
                     ("Context.outputs:context", "ClockPub.inputs:context"),
                     ("Context.outputs:context", "JointStatePub.inputs:context"),
                     ("Context.outputs:context", "ImuPub.inputs:context"),
+                    ("ReadTime.outputs:simulationTime", "JointStatePub.inputs:timeStamp"),
                     ("ReadTime.outputs:simulationTime", "ClockPub.inputs:timeStamp"),
                     ("ReadTime.outputs:simulationTime", "ImuPub.inputs:timeStamp"),
                     ("OdomCompute.outputs:orientation", "ImuPub.inputs:orientation"),

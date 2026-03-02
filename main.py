@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import argparse
+import sys
 import traceback
 
 from isaaclab.app import AppLauncher
@@ -22,18 +23,13 @@ from scripts.sim2real.app.phases import prepare_m1_runtime, run_m1_sensor_phase
 
 
 def _resolve_runtime_device() -> str:
-    """런타임 디바이스 자동 선택.
+    """런타임 기본 디바이스 선택.
 
     규칙:
-    - CUDA 사용 가능하면 cuda:0
-    - 아니면 cpu
+    - Sim2Real 제어 트랙은 CPU를 기본값으로 사용
+    - GPU를 쓰려면 --device cuda:0 를 명시
     """
-    try:
-        import torch
-
-        return "cuda:0" if torch.cuda.is_available() else "cpu"
-    except Exception:
-        return "cpu"
+    return "cpu"
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -45,7 +41,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--task", choices=["flat", "rough"], default=None)
     parser.add_argument("--num_envs", type=int, default=None)
     parser.add_argument("--steps", type=int, default=None)
-    parser.add_argument("--disable_fabric", action="store_true", default=None)
+    parser.add_argument("--disable_fabric", action=argparse.BooleanOptionalAction, default=None)
     parser.add_argument("--reset_on_done", action=argparse.BooleanOptionalAction, default=None)
     parser.add_argument("--sim_dt", type=float, default=None)
     parser.add_argument("--decimation", type=int, default=None)
@@ -61,14 +57,39 @@ def _build_parser() -> argparse.ArgumentParser:
 def run(argv: list[str] | None = None, forced_phase: str | None = None) -> int:
     parser = _build_parser()
     args_cli = parser.parse_args(argv)
-    # 디바이스 자동 선택: GPU 있으면 cuda:0, 없으면 cpu
-    resolved_device = _resolve_runtime_device()
-    if getattr(args_cli, "device", None) != resolved_device:
+    raw_argv = list(argv) if argv is not None else sys.argv[1:]
+    device_from_cli = "--device" in raw_argv
+    disable_from_cli = ("--disable_fabric" in raw_argv) or ("--no-disable_fabric" in raw_argv)
+
+    # 1) device 결정
+    if device_from_cli:
+        selected_device = str(args_cli.device)
+    else:
+        selected_device = _resolve_runtime_device()
+
+    # 2) disable_fabric 결정
+    # - CLI로 명시했으면 그 값을 최우선
+    # - 아니면 디바이스 기반 자동 선택(cpu면 true, cuda면 false)
+    if disable_from_cli:
+        selected_disable_fabric = bool(args_cli.disable_fabric)
+    else:
+        selected_disable_fabric = selected_device.startswith("cpu")
+
+    # --disable_fabric 명시 시 안정성을 위해 device를 cpu로 강제
+    if disable_from_cli and selected_disable_fabric and selected_device != "cpu":
         print(
-            f"[CONFIG] overriding --device to auto-selected value: {resolved_device}",
+            "[CONFIG] overriding --device to cpu because --disable_fabric was explicitly set",
             flush=True,
         )
-    args_cli.device = resolved_device
+        selected_device = "cpu"
+
+    args_cli.device = selected_device
+    args_cli.disable_fabric = selected_disable_fabric
+    print(
+        f"[CONFIG] device={args_cli.device} disable_fabric={args_cli.disable_fabric}"
+        f" (device_cli={device_from_cli}, disable_cli={disable_from_cli})",
+        flush=True,
+    )
 
     config = load_sim2real_config(args_cli.config)
     default_phase = str(config.get("sim2real", {}).get("phase", "m1_sensor"))

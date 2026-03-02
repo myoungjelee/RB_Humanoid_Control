@@ -25,7 +25,7 @@ sim2real:
       strict: true
       graph_path: /RBM1Graph
       robot_prim: /World/envs/env_0/Robot/pelvis
-      tick_source: on_playback_tick
+      tick_source: on_physics_step
       tick_only_playback: false
       tick_frame_period: 0
       frame_ids:
