@@ -26,7 +26,7 @@ def resolve_task_id(task_short: str) -> str:
 
 def create_env(args_cli: Any, phase_cfg: dict[str, Any]):
     """M1 실행용 IsaacLab env를 생성해서 반환한다."""
-    import gymnasium as gym
+    import gymnasium as gym  # noqa: I001  # Isaac runtime order/lazy import
 
     # task 등록 side-effect import (gym.make에서 task id 인식용)
     import RB_Humanoid_Control.tasks  # noqa: F401
@@ -40,6 +40,11 @@ def create_env(args_cli: Any, phase_cfg: dict[str, Any]):
         use_fabric=not bool(phase_cfg.get("disable_fabric", False)),
     )
 
+    scene_cfg = getattr(env_cfg, "scene", None)
+    robot_cfg = getattr(scene_cfg, "robot", None)
+    robot_spawn_cfg = getattr(robot_cfg, "spawn", None)
+    sim_cfg = getattr(env_cfg, "sim", None)
+
     # 로컬 USD 경로를 지정하면 기본 Nucleus 경로 대신 강제 사용한다.
     # 예: /home/leemou/Projects/RB_Humanoid_Control/sim/isaac_scenes/g1_local.usd
     robot_usd_path = phase_cfg.get("robot_usd_path")
@@ -47,27 +52,22 @@ def create_env(args_cli: Any, phase_cfg: dict[str, Any]):
         usd_path = str(Path(str(robot_usd_path)).expanduser().resolve())
         if not Path(usd_path).exists():
             raise FileNotFoundError(f"robot_usd_path not found: {usd_path}")
-        if not hasattr(env_cfg, "scene") or not hasattr(env_cfg.scene, "robot"):
+        if robot_cfg is None:
             raise RuntimeError("env_cfg.scene.robot not found, cannot apply robot_usd_path")
-        if not hasattr(env_cfg.scene.robot, "spawn") or not hasattr(env_cfg.scene.robot.spawn, "usd_path"):
+        if robot_spawn_cfg is None or not hasattr(robot_spawn_cfg, "usd_path"):
             raise RuntimeError("env_cfg.scene.robot.spawn.usd_path not found, cannot apply robot_usd_path")
-        env_cfg.scene.robot.spawn.usd_path = usd_path
+        setattr(robot_spawn_cfg, "usd_path", usd_path)
 
     # Sim2Real에서 고정하기로 한 타이밍 파라미터를 cfg에 반영
     if hasattr(env_cfg, "decimation"):
         env_cfg.decimation = int(phase_cfg["decimation"])
-    if hasattr(env_cfg, "sim") and hasattr(env_cfg.sim, "dt"):
-        env_cfg.sim.dt = float(phase_cfg["sim_dt"])
-    if hasattr(env_cfg, "sim") and hasattr(env_cfg.sim, "substeps"):
-        env_cfg.sim.substeps = int(phase_cfg["substeps"])
+    if sim_cfg is not None and hasattr(sim_cfg, "dt"):
+        setattr(sim_cfg, "dt", float(phase_cfg["sim_dt"]))
+    if sim_cfg is not None and hasattr(sim_cfg, "substeps"):
+        setattr(sim_cfg, "substeps", int(phase_cfg["substeps"]))
 
     env = gym.make(task_id, cfg=env_cfg)
     resolved_usd_path = None
-    if (
-        hasattr(env_cfg, "scene")
-        and hasattr(env_cfg.scene, "robot")
-        and hasattr(env_cfg.scene.robot, "spawn")
-        and hasattr(env_cfg.scene.robot.spawn, "usd_path")
-    ):
-        resolved_usd_path = str(env_cfg.scene.robot.spawn.usd_path)
+    if robot_spawn_cfg is not None and hasattr(robot_spawn_cfg, "usd_path"):
+        resolved_usd_path = str(getattr(robot_spawn_cfg, "usd_path"))
     return task_id, env, resolved_usd_path

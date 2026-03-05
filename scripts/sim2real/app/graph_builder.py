@@ -1,9 +1,13 @@
-"""M1 센서 파이프라인용 OmniGraph 생성기.
+"""Sim2Real OmniGraph 생성기.
 
-목표 토픽:
+M1 목표 토픽:
 - /clock
 - /rb/joint_states
 - /rb/imu
+
+M3 목표:
+- M1 센서 토픽 유지
+- /rb/command_raw 구독 후 articulation에 명령 적용
 """
 
 from __future__ import annotations
@@ -103,8 +107,13 @@ def _resolve_robot_prim(env: Any, override: str | None) -> str:
     return expanded[0]
 
 
-def build_m1_sensor_graph(env: Any, phase_cfg: dict[str, Any]) -> tuple[bool, str]:
-    """M1 최소 센서 그래프 생성.
+def _build_sensor_graph(
+    env: Any,
+    phase_cfg: dict[str, Any],
+    *,
+    include_command_apply: bool,
+) -> tuple[bool, str]:
+    """센서 그래프를 생성하고, 옵션으로 command apply 노드를 추가한다.
 
     반환:
     - bool: 생성 성공 여부
@@ -123,6 +132,7 @@ def build_m1_sensor_graph(env: Any, phase_cfg: dict[str, Any]) -> tuple[bool, st
     frame_imu = str(frame_cfg.get("imu", "imu_link"))
     topic_joint = str(topics.get("joint_states", "/rb/joint_states"))
     topic_imu = str(topics.get("imu", "/rb/imu"))
+    topic_command_raw = str(topics.get("command_raw", "/rb/command_raw"))
     tick_source = str(graph_cfg.get("tick_source", "on_physics_step")).lower()
     if tick_source == "on_physics_step":
         tick_node_type = "isaacsim.core.nodes.OnPhysicsStep"
@@ -167,50 +177,85 @@ def build_m1_sensor_graph(env: Any, phase_cfg: dict[str, Any]) -> tuple[bool, st
         if use_on_demand_pipeline:
             graph_spec["pipeline_stage"] = og.GraphPipelineStage.GRAPH_PIPELINE_STAGE_ONDEMAND
 
+        create_nodes: list[tuple[str, str]] = [
+            ("Tick", tick_node_type),
+            ("Context", "isaacsim.ros2.bridge.ROS2Context"),
+            ("ReadTime", "isaacsim.core.nodes.IsaacReadSimulationTime"),
+            ("ClockPub", "isaacsim.ros2.bridge.ROS2PublishClock"),
+            ("JointStatePub", "isaacsim.ros2.bridge.ROS2PublishJointState"),
+            ("OdomCompute", "isaacsim.core.nodes.IsaacComputeOdometry"),
+            ("ImuPub", "isaacsim.ros2.bridge.ROS2PublishImu"),
+        ]
+        connect_edges: list[tuple[str, str]] = [
+            (f"Tick.{tick_output_port}", "ClockPub.inputs:execIn"),
+            (f"Tick.{tick_output_port}", "JointStatePub.inputs:execIn"),
+            (f"Tick.{tick_output_port}", "OdomCompute.inputs:execIn"),
+            (f"Tick.{tick_output_port}", "ImuPub.inputs:execIn"),
+            ("Context.outputs:context", "ClockPub.inputs:context"),
+            ("Context.outputs:context", "JointStatePub.inputs:context"),
+            ("Context.outputs:context", "ImuPub.inputs:context"),
+            ("ReadTime.outputs:simulationTime", "JointStatePub.inputs:timeStamp"),
+            ("ReadTime.outputs:simulationTime", "ClockPub.inputs:timeStamp"),
+            ("ReadTime.outputs:simulationTime", "ImuPub.inputs:timeStamp"),
+            ("OdomCompute.outputs:orientation", "ImuPub.inputs:orientation"),
+            ("OdomCompute.outputs:angularVelocity", "ImuPub.inputs:angularVelocity"),
+            ("OdomCompute.outputs:linearAcceleration", "ImuPub.inputs:linearAcceleration"),
+        ]
+        set_values: list[tuple[str, Any]] = [
+            ("JointStatePub.inputs:targetPrim", robot_prim),
+            ("JointStatePub.inputs:topicName", topic_joint),
+            ("OdomCompute.inputs:chassisPrim", robot_prim),
+            ("ImuPub.inputs:topicName", topic_imu),
+            ("ImuPub.inputs:frameId", frame_imu),
+            ("ImuPub.inputs:publishOrientation", True),
+            ("ImuPub.inputs:publishAngularVelocity", True),
+            ("ImuPub.inputs:publishLinearAcceleration", True),
+        ]
+
+        if include_command_apply:
+            create_nodes.extend(
+                [
+                    ("JointStateSub", "isaacsim.ros2.bridge.ROS2SubscribeJointState"),
+                    ("ArticulationController", "isaacsim.core.nodes.IsaacArticulationController"),
+                ]
+            )
+            connect_edges.extend(
+                [
+                    (f"Tick.{tick_output_port}", "JointStateSub.inputs:execIn"),
+                    (f"Tick.{tick_output_port}", "ArticulationController.inputs:execIn"),
+                    ("Context.outputs:context", "JointStateSub.inputs:context"),
+                    (
+                        "JointStateSub.outputs:jointNames",
+                        "ArticulationController.inputs:jointNames",
+                    ),
+                    (
+                        "JointStateSub.outputs:positionCommand",
+                        "ArticulationController.inputs:positionCommand",
+                    ),
+                    (
+                        "JointStateSub.outputs:velocityCommand",
+                        "ArticulationController.inputs:velocityCommand",
+                    ),
+                    (
+                        "JointStateSub.outputs:effortCommand",
+                        "ArticulationController.inputs:effortCommand",
+                    ),
+                ]
+            )
+            set_values.extend(
+                [
+                    ("JointStateSub.inputs:topicName", topic_command_raw),
+                    ("ArticulationController.inputs:robotPath", robot_prim),
+                ]
+            )
+
         # 그래프 생성 + 노드 연결 + 기본 값 세팅
         (graph, _, _, _) = og.Controller.edit(
             graph_spec,
             {
-                keys.CREATE_NODES: [
-                    ("Tick", tick_node_type),
-                    ("Context", "isaacsim.ros2.bridge.ROS2Context"),
-                    ("ReadTime", "isaacsim.core.nodes.IsaacReadSimulationTime"),
-                    ("ClockPub", "isaacsim.ros2.bridge.ROS2PublishClock"),
-                    ("JointStatePub", "isaacsim.ros2.bridge.ROS2PublishJointState"),
-                    ("OdomCompute", "isaacsim.core.nodes.IsaacComputeOdometry"),
-                    ("ImuPub", "isaacsim.ros2.bridge.ROS2PublishImu"),
-                ],
-                keys.CONNECT: [
-                    (f"Tick.{tick_output_port}", "ClockPub.inputs:execIn"),
-                    (f"Tick.{tick_output_port}", "JointStatePub.inputs:execIn"),
-                    (f"Tick.{tick_output_port}", "OdomCompute.inputs:execIn"),
-                    (f"Tick.{tick_output_port}", "ImuPub.inputs:execIn"),
-                    ("Context.outputs:context", "ClockPub.inputs:context"),
-                    ("Context.outputs:context", "JointStatePub.inputs:context"),
-                    ("Context.outputs:context", "ImuPub.inputs:context"),
-                    ("ReadTime.outputs:simulationTime", "JointStatePub.inputs:timeStamp"),
-                    ("ReadTime.outputs:simulationTime", "ClockPub.inputs:timeStamp"),
-                    ("ReadTime.outputs:simulationTime", "ImuPub.inputs:timeStamp"),
-                    ("OdomCompute.outputs:orientation", "ImuPub.inputs:orientation"),
-                    (
-                        "OdomCompute.outputs:angularVelocity",
-                        "ImuPub.inputs:angularVelocity",
-                    ),
-                    (
-                        "OdomCompute.outputs:linearAcceleration",
-                        "ImuPub.inputs:linearAcceleration",
-                    ),
-                ],
-                keys.SET_VALUES: [
-                    ("JointStatePub.inputs:targetPrim", robot_prim),
-                    ("JointStatePub.inputs:topicName", topic_joint),
-                    ("OdomCompute.inputs:chassisPrim", robot_prim),
-                    ("ImuPub.inputs:topicName", topic_imu),
-                    ("ImuPub.inputs:frameId", frame_imu),
-                    ("ImuPub.inputs:publishOrientation", True),
-                    ("ImuPub.inputs:publishAngularVelocity", True),
-                    ("ImuPub.inputs:publishLinearAcceleration", True),
-                ],
+                keys.CREATE_NODES: create_nodes,
+                keys.CONNECT: connect_edges,
+                keys.SET_VALUES: set_values,
             },
         )
         # OnTick일 때만 onlyPlayback/framePeriod 입력 포트가 존재
@@ -228,6 +273,7 @@ def build_m1_sensor_graph(env: Any, phase_cfg: dict[str, Any]) -> tuple[bool, st
                 f"{graph_path} robot_prim={robot_prim}"
                 f" tick_node={tick_node_type} tick_output={tick_output_port} only_playback={tick_only_playback}"
                 f" frame_period={tick_frame_period} evaluator={evaluator_name}"
+                f" command_apply={include_command_apply} command_topic={topic_command_raw}"
             ),
         )
     except Exception as exc:
@@ -235,3 +281,13 @@ def build_m1_sensor_graph(env: Any, phase_cfg: dict[str, Any]) -> tuple[bool, st
         if strict:
             raise RuntimeError(note) from exc
         return False, note
+
+
+def build_m1_sensor_graph(env: Any, phase_cfg: dict[str, Any]) -> tuple[bool, str]:
+    """M1 최소 센서 그래프 생성."""
+    return _build_sensor_graph(env=env, phase_cfg=phase_cfg, include_command_apply=False)
+
+
+def build_m3_command_graph(env: Any, phase_cfg: dict[str, Any]) -> tuple[bool, str]:
+    """M3 명령 적용 그래프 생성(M1 센서 + command apply)."""
+    return _build_sensor_graph(env=env, phase_cfg=phase_cfg, include_command_apply=True)

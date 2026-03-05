@@ -19,7 +19,11 @@ from scripts.sim2real.app.config import (
     get_phase_config,
     load_sim2real_config,
 )
-from scripts.sim2real.app.phases import prepare_m1_runtime, run_m1_sensor_phase
+from scripts.sim2real.app.phases import (
+    prepare_phase_runtime,
+    run_m1_sensor_phase,
+    run_m3_command_phase,
+)
 
 
 def _resolve_runtime_device() -> str:
@@ -96,12 +100,12 @@ def run(argv: list[str] | None = None, forced_phase: str | None = None) -> int:
     phase = forced_phase or args_cli.phase or default_phase
 
     phase_cfg = get_phase_config(config, phase)
-    if phase == "m1_sensor":
+    if phase in ("m1_sensor", "m3_command"):
         phase_cfg = apply_m1_cli_overrides(phase_cfg, args_cli)
     else:
         raise ValueError(f"Unsupported phase: {phase}")
 
-    prepare_m1_runtime(args_cli, phase_cfg)
+    prepare_phase_runtime(args_cli, phase_cfg)
     app_launcher = AppLauncher(args_cli)
     simulation_app = app_launcher.app
 
@@ -109,14 +113,18 @@ def run(argv: list[str] | None = None, forced_phase: str | None = None) -> int:
     try:
         if phase == "m1_sensor":
             result = run_m1_sensor_phase(args_cli, phase_cfg, simulation_app)
-            print(f"[RESULT] task_id={result.get('task_id')}", flush=True)
-            print(f"[RESULT] status={result.get('status')}", flush=True)
-            print(f"[RESULT] executed_steps={result.get('executed_steps')}", flush=True)
-            print(f"[RESULT] elapsed_sec={result.get('elapsed_sec')}", flush=True)
-            print(f"[RESULT] graph_built={result.get('graph_built')}", flush=True)
-            print(f"[RESULT] graph_note={result.get('graph_note')}", flush=True)
-            status = str(result.get("status", "failed"))
-            exit_code = 0 if status in ("completed_target_steps", "stopped_early", "stopped_no_step_limit") else 1
+        elif phase == "m3_command":
+            result = run_m3_command_phase(args_cli, phase_cfg, simulation_app)
+        else:
+            raise ValueError(f"Unsupported phase: {phase}")
+        print(f"[RESULT] task_id={result.get('task_id')}", flush=True)
+        print(f"[RESULT] status={result.get('status')}", flush=True)
+        print(f"[RESULT] executed_steps={result.get('executed_steps')}", flush=True)
+        print(f"[RESULT] elapsed_sec={result.get('elapsed_sec')}", flush=True)
+        print(f"[RESULT] graph_built={result.get('graph_built')}", flush=True)
+        print(f"[RESULT] graph_note={result.get('graph_note')}", flush=True)
+        status = str(result.get("status", "failed"))
+        exit_code = 0 if status in ("completed_target_steps", "stopped_early", "stopped_no_step_limit") else 1
     except Exception as exc:
         print(f"[ERROR] exception: {type(exc).__name__}: {exc}", flush=True)
         print(traceback.format_exc(), flush=True)

@@ -5,7 +5,7 @@
 Stage1(`reports/stage1/*`)은 baseline 증거로 유지하고, 본 문서는 메인트랙 결과를 기록한다.
 
 ## 2) 현재 단계
-- 상태: M0 완료, M1 완료, M2 완료, M3 진행 준비
+- 상태: M0 완료, M1 완료, M2 완료, M3 완료, M4 진행 준비
 - 기준 문서:
   - `AGENTS.md`
   - `MASTER_PLAN.md`
@@ -35,11 +35,21 @@ Stage1(`reports/stage1/*`)은 baseline 증거로 유지하고, 본 문서는 메
 - dt/jitter 통계 출력(`dt_mean/dt_max/p95/miss_count`) 확인
 - 증빙 이미지: `reports/sim2real/images/m2_controller.png`
 
-## 6) 다음 검증 항목(M3)
-- `/rb/command` -> Isaac articulation 적용 연결
-- 입력 -> 출력 -> 물리 반영 루프 검증
+## 6) 완료 항목(M3)
+- OmniGraph command apply 경로 구성:
+  - `ROS2SubscribeJointState` -> `IsaacArticulationController`
+  - topic: `/rb/command_raw`
+- `command_apply=True` 그래프 구성 로그 확인
+- `/rb/command_raw` 200Hz 근처 발행 확인
+- `/rb/joint_states` before/after diff 변화 확인
+- 증빙 이미지: `reports/sim2real/images/m3_command.png`
+- 보조 로그: `logs/sim2real/m3/*`
 
-## 7) 아티팩트 경로
+## 7) 다음 검증 항목(M4)
+- safety gate(clamp/timeout/tilt) 추가
+- 안전 개입(reason) 로그/토픽 증빙
+
+## 8) 아티팩트 경로
 - 실행 로그: `logs/sim2real/<timestamp>/`
 - 요약 리포트: `reports/sim2real/overview.md`
 - one-pager: `reports/sim2real/ONE_PAGER.md`

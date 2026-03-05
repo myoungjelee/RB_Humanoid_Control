@@ -1,6 +1,8 @@
 """Sim2Real phase 실행 로직.
 
-현재는 M1(sensor publish 확인) phase만 구현되어 있다.
+현재 구현 phase:
+- M1(sensor publish 확인)
+- M3(command apply 확인)
 학습/분석 우선: 자동 로그/자동 캡처는 포함하지 않는다.
 """
 
@@ -11,12 +13,12 @@ from typing import Any
 
 from rb_utils.termination_utils import as_any_bool
 
-from .graph_builder import build_m1_sensor_graph
+from .graph_builder import build_m1_sensor_graph, build_m3_command_graph
 from .world import create_env
 
 
-def prepare_m1_runtime(args_cli: Any, phase_cfg: dict[str, Any]) -> None:
-    """M1 실행 직전 런타임 세팅.
+def prepare_phase_runtime(args_cli: Any, phase_cfg: dict[str, Any]) -> None:
+    """phase 실행 직전 런타임 세팅.
 
     현재는 ROS2 bridge extension 활성화 인자만 주입한다.
     """
@@ -25,12 +27,18 @@ def prepare_m1_runtime(args_cli: Any, phase_cfg: dict[str, Any]) -> None:
         args_cli.kit_args = f"{args_cli.kit_args} --enable {ext}".strip()
 
 
-def run_m1_sensor_phase(args_cli: Any, phase_cfg: dict[str, Any], simulation_app: Any) -> dict[str, Any]:
-    """M1 phase 실행.
+def _run_rollout_phase(
+    args_cli: Any,
+    phase_cfg: dict[str, Any],
+    simulation_app: Any,
+    *,
+    graph_builder: Any,
+) -> dict[str, Any]:
+    """공통 rollout phase 실행기.
 
-    흐름:
+    공통 흐름:
     1) env reset
-    2) OmniGraph 구성(/clock, /rb/joint_states, /rb/imu)
+    2) OmniGraph 구성
     3) rollout step 진행
     """
     import torch
@@ -59,10 +67,11 @@ def run_m1_sensor_phase(args_cli: Any, phase_cfg: dict[str, Any], simulation_app
             print(f"[TIMELINE] warning: failed to control timeline: {type(exc).__name__}: {exc}", flush=True)
 
         _, _ = env.reset()
-        graph_built, graph_note = build_m1_sensor_graph(env=env, phase_cfg=phase_cfg)
+        graph_built, graph_note = graph_builder(env=env, phase_cfg=phase_cfg)
         print(f"[GRAPH] built={graph_built} note={graph_note}", flush=True)
 
-        device = env.unwrapped.device
+        unwrapped = getattr(env, "unwrapped", None)
+        device = getattr(unwrapped, "device", "cpu")
         action_shape = env.action_space.shape
         if not isinstance(action_shape, tuple):
             raise RuntimeError("Invalid env.action_space.shape")
@@ -71,6 +80,15 @@ def run_m1_sensor_phase(args_cli: Any, phase_cfg: dict[str, Any], simulation_app
         t0 = time.time()
         target_steps = int(phase_cfg.get("steps", -1))
         infinite_steps = target_steps <= 0
+        progress_log_interval_sec = float(phase_cfg.get("progress_log_interval_sec", 10.0))
+        if progress_log_interval_sec < 0.0:
+            progress_log_interval_sec = 10.0
+        target_text = "INF" if infinite_steps else str(target_steps)
+        print(
+            f"[RUNNING] phase_steps={target_text} progress_log_interval_sec={progress_log_interval_sec}",
+            flush=True,
+        )
+        last_progress_log_sec = t0
         sim = getattr(env.unwrapped, "sim", None)
 
         while simulation_app.is_running() and (infinite_steps or executed_steps < target_steps):
@@ -83,9 +101,13 @@ def run_m1_sensor_phase(args_cli: Any, phase_cfg: dict[str, Any], simulation_app
                 sim.render()
 
             executed_steps += 1
-            if executed_steps % 200 == 0:
-                target_text = "INF" if infinite_steps else str(target_steps)
-                print(f"[STEP] {executed_steps}/{target_text}", flush=True)
+            now_sec = time.time()
+            if progress_log_interval_sec > 0.0 and (now_sec - last_progress_log_sec) >= progress_log_interval_sec:
+                print(
+                    f"[HEARTBEAT] steps={executed_steps}/{target_text} elapsed_sec={now_sec - t0:.2f}",
+                    flush=True,
+                )
+                last_progress_log_sec = now_sec
 
             done = as_any_bool(terminated) or as_any_bool(truncated)
             if done and bool(phase_cfg.get("reset_on_done", True)):
@@ -111,3 +133,23 @@ def run_m1_sensor_phase(args_cli: Any, phase_cfg: dict[str, Any], simulation_app
         "graph_built": graph_built,
         "graph_note": graph_note,
     }
+
+
+def run_m1_sensor_phase(args_cli: Any, phase_cfg: dict[str, Any], simulation_app: Any) -> dict[str, Any]:
+    """M1 phase 실행(/clock, /rb/joint_states, /rb/imu publish 확인)."""
+    return _run_rollout_phase(
+        args_cli=args_cli,
+        phase_cfg=phase_cfg,
+        simulation_app=simulation_app,
+        graph_builder=build_m1_sensor_graph,
+    )
+
+
+def run_m3_command_phase(args_cli: Any, phase_cfg: dict[str, Any], simulation_app: Any) -> dict[str, Any]:
+    """M3 phase 실행(/rb/command_raw -> articulation 적용 검증)."""
+    return _run_rollout_phase(
+        args_cli=args_cli,
+        phase_cfg=phase_cfg,
+        simulation_app=simulation_app,
+        graph_builder=build_m3_command_graph,
+    )

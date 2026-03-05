@@ -1,0 +1,75 @@
+# RB_Humanoid_Control -- 단계별 한줄 정리
+
+---
+
+## M1
+
+### 센서가 잘 들어오는지 확인
+
+- /clock
+- /rb/joint_states
+- /rb/imu -> 데이터 흐름 검증 단계
+
+---
+
+## M2
+
+### 제어 루프가 잘 도는지 확인
+
+- 200Hz timer
+- dt_mean / dt_p95 / miss_count -> 타이밍 안정성 증명
+
+---
+
+## M3
+
+### 제어 출력이 모터(시뮬)에 전달되는지 확인
+
+- /rb/command_raw -> Isaac articulation 연결
+- joint_states 변화 확인 -> 입력 -> 물리 -> 출력 루프 검증
+
+---
+
+## M4
+
+### 문제 생기면 안전하게 멈추는지 확인
+
+- torque clamp
+- timeout watchdog
+- tilt limit -> 안전 레이어 검증
+
+---
+
+## M5
+
+### 정책 없이도 서 있는지 확인
+
+- Standing 안정성
+- 외란(Impulse) 복원
+- KPI 수치 확보 -> 제어 기반 완성 단계
+
+---
+
+## M6
+
+### 정책을 얹을 준비
+
+- 정책 출력 타입 정의
+- 200Hz(제어) / 50Hz(정책) 분리
+- last-valid / timeout 설계 -> 통합 구조 준비 단계
+
+---
+
+## M7
+
+### GPU 정책 통합 테스트
+
+- inference latency 측정
+- timeout 동작 확인 -> 정책 포함 전체 시스템 검증
+
+---
+
+## 핵심 철학
+
+제어는 항상 정책과 독립적으로 안정적이어야 한다.
+정책은 행동을 개선하는 계층이고, 안전과 균형은 제어 루프가 책임진다.
