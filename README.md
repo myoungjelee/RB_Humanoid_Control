@@ -36,7 +36,8 @@ Isaac Sim (ROS2 Bridge)
 - M1 proof image: `reports/sim2real/images/m1.png`
 - M2 proof image: `reports/sim2real/images/m2_controller.png`
 - M3 proof image: `reports/sim2real/images/m3_command.png`
-- Saved stage USD: `sim/isaac_scenes/g1_stage.usd`
+- M4 proof image: `reports/sim2real/images/m4_safety.png`
+- Saved stage USD (로컬 전용, git 미추적): `sim/isaac_scenes/g1_stage.usd`
 - Stage1 overview: `reports/stage1/overview.md`
 - Stage1 one-pager: `reports/stage1/ONE_PAGER.md`
 - Current status: `STATUS.md`
@@ -51,16 +52,19 @@ Isaac Sim (ROS2 Bridge)
 ## M3 Snapshot
 ![M3 Command Apply Proof](reports/sim2real/images/m3_command.png)
 
-## Current Progress (2026-03-05)
+## M4 Snapshot
+![M4 Safety Proof](reports/sim2real/images/m4_safety.png)
+
+## Current Progress (2026-03-09)
 - M0 Decision Lock: complete
 - M1 Sensor Pipeline: complete
 - M2 C++ Controller Skeleton: complete
 - M3 Command Apply: complete
-- Active sprint: M4
+- M4 Safety Layer: complete
+- Active sprint: M5
 - Re-apply gate: M6 complete
 - Re-apply deadline target: 2026-03-26
 
 ## Next Milestones
-- M4: safety integration
 - M5: stand stabilization (20~30s)
 - M6: KPI/report automation

@@ -1,0 +1,114 @@
+# Source: logs/sim2real/m4/g1_joint_limits_rad.csv
+joint_count: 37
+joint_limits:
+  left_hip_pitch_joint:
+    lower: -2.349999711181
+    upper: 3.049999885799
+  right_hip_pitch_joint:
+    lower: -2.349999711181
+    upper: 3.049999885799
+  torso_joint:
+    lower: -2.618000003262
+    upper: 2.618000003262
+  left_hip_roll_joint:
+    lower: -0.259999973074
+    upper: 2.529999839782
+  left_hip_yaw_joint:
+    lower: -2.749999849008
+    upper: 2.749999849008
+  left_knee_joint:
+    lower: -0.334889977074
+    upper: 2.544899693449
+  left_ankle_pitch_joint:
+    lower: -0.679999967990
+    upper: 0.729999951929
+  left_ankle_roll_joint:
+    lower: -0.261799970366
+    upper: 0.261799970366
+  right_hip_roll_joint:
+    lower: -2.529999839782
+    upper: 0.259999973074
+  right_hip_yaw_joint:
+    lower: -2.749999849008
+    upper: 2.749999849008
+  right_knee_joint:
+    lower: -0.334889977074
+    upper: 2.544899693449
+  right_ankle_pitch_joint:
+    lower: -0.679999967990
+    upper: 0.729999951929
+  right_ankle_roll_joint:
+    lower: -0.261799970366
+    upper: 0.261799970366
+  left_shoulder_pitch_joint:
+    lower: -2.967099675807
+    upper: 2.792499905264
+  right_shoulder_pitch_joint:
+    lower: -2.967099675807
+    upper: 2.792499905264
+  left_shoulder_roll_joint:
+    lower: -1.588199951361
+    upper: 2.251499768787
+  left_shoulder_yaw_joint:
+    lower: -2.618000003262
+    upper: 2.618000003262
+  left_elbow_pitch_joint:
+    lower: -0.226799974951
+    upper: 3.420799793854
+  left_elbow_roll_joint:
+    lower: -2.094299894384
+    upper: 2.094299894384
+  left_five_joint:
+    lower: -1.839999968215
+    upper: 0.300000003502
+  left_three_joint:
+    lower: -1.839999968215
+    upper: 0.300000003502
+  left_zero_joint:
+    lower: -0.523597976650
+    upper: 0.523597976650
+  left_six_joint:
+    lower: -1.839999968215
+    upper: 0.000000000000
+  left_four_joint:
+    lower: -1.839999968215
+    upper: 0.000000000000
+  left_one_joint:
+    lower: -0.999999945094
+    upper: 1.200000014007
+  left_two_joint:
+    lower: 0.000000000000
+    upper: 1.839999968215
+  right_shoulder_roll_joint:
+    lower: -2.251499768787
+    upper: 1.588199951361
+  right_shoulder_yaw_joint:
+    lower: -2.618000003262
+    upper: 2.618000003262
+  right_elbow_pitch_joint:
+    lower: -0.226799974951
+    upper: 3.420799793854
+  right_elbow_roll_joint:
+    lower: -2.094299894384
+    upper: 2.094299894384
+  right_five_joint:
+    lower: -0.300000003502
+    upper: 1.839999968215
+  right_three_joint:
+    lower: -0.300000003502
+    upper: 1.839999968215
+  right_zero_joint:
+    lower: -0.523597976650
+    upper: 0.523597976650
+  right_six_joint:
+    lower: 0.000000000000
+    upper: 1.839999968215
+  right_four_joint:
+    lower: 0.000000000000
+    upper: 1.839999968215
+  right_one_joint:
+    lower: -1.200000014007
+    upper: 0.999999945094
+  right_two_joint:
+    lower: -1.839999968215
+    upper: 0.000000000000
