@@ -1,6 +1,6 @@
-"""Launch rb_controller with a default safety parameter file.
+"""Launch rb_controller + rb_safety with a default safety parameter file.
 
-This launch file provides one-line startup for the controller and loads
+This launch file provides one-line startup for controller + safety and loads
 `config/safety.yaml` by default. Operators can still override `params_file`.
 """
 
@@ -12,7 +12,7 @@ from launch_ros.substitutions import FindPackageShare
 
 
 def generate_launch_description() -> LaunchDescription:
-    """Generate launch description for rb_controller node."""
+    """Generate launch description for rb_controller + rb_safety nodes."""
     # 패키지 설치 경로 기준 기본 파라미터 파일(안전 설정)을 찾는다.
     default_params_file = PathJoinSubstitution(
         [FindPackageShare("rb_controller"), "config", "safety.yaml"]
@@ -50,11 +50,24 @@ def generate_launch_description() -> LaunchDescription:
         arguments=["--ros-args", "--log-level", LaunchConfiguration("log_level")],
     )
 
+    safety_node = Node(
+        package="rb_controller",
+        executable="rb_safety_node",
+        name="rb_safety",
+        output="screen",
+        parameters=[
+            LaunchConfiguration("params_file"),
+            {"use_sim_time": LaunchConfiguration("use_sim_time")},
+        ],
+        arguments=["--ros-args", "--log-level", LaunchConfiguration("log_level")],
+    )
+
     return LaunchDescription(
         [
             params_file_arg,
             use_sim_time_arg,
             log_level_arg,
             controller_node,
+            safety_node,
         ]
     )

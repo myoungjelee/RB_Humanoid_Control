@@ -1,5 +1,15 @@
 rb_controller:
   ros__parameters:
+    signal_mode: step_effort
+    target_joint: left_knee_joint
+    effort_amplitude: 5.0
+    step_start_sec: 0.0
+
+rb_safety:
+  ros__parameters:
+    input_command_topic: /rb/command_raw
+    output_command_topic: /rb/command_safe
+    input_joint_states_topic: /rb/joint_states
     safety_enabled: true
     safe_mode_action: zero_effort
     effort_abs_max_default: 8.0
@@ -120,7 +130,3 @@ rb_controller:
       right_two_joint:
         lower: -1.839999968215
         upper: 0.0
-    signal_mode: step_effort
-    target_joint: left_knee_joint
-    effort_amplitude: 5.0
-    step_start_sec: 0.0

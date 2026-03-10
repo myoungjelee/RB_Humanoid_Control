@@ -3,6 +3,7 @@
 현재 구현 phase:
 - M1(sensor publish 확인)
 - M3(command apply 확인)
+- M5(stand: /rb/command_safe 적용 확인)
 학습/분석 우선: 자동 로그/자동 캡처는 포함하지 않는다.
 """
 
@@ -147,6 +148,16 @@ def run_m1_sensor_phase(args_cli: Any, phase_cfg: dict[str, Any], simulation_app
 
 def run_m3_command_phase(args_cli: Any, phase_cfg: dict[str, Any], simulation_app: Any) -> dict[str, Any]:
     """M3 phase 실행(/rb/command_raw -> articulation 적용 검증)."""
+    return _run_rollout_phase(
+        args_cli=args_cli,
+        phase_cfg=phase_cfg,
+        simulation_app=simulation_app,
+        graph_builder=build_m3_command_graph,
+    )
+
+
+def run_m5_stand_phase(args_cli: Any, phase_cfg: dict[str, Any], simulation_app: Any) -> dict[str, Any]:
+    """M5 phase 실행(/rb/command_safe -> articulation 적용 확인)."""
     return _run_rollout_phase(
         args_cli=args_cli,
         phase_cfg=phase_cfg,

@@ -14,13 +14,22 @@ add_executable(rb_controller_node
   src/controller_node.cpp
 )
 
+add_executable(rb_safety_node
+  src/safety_node.cpp
+)
+
 target_compile_features(rb_controller_node PUBLIC cxx_std_17)
+target_compile_features(rb_safety_node PUBLIC cxx_std_17)
 ament_target_dependencies(rb_controller_node
   rclcpp
   sensor_msgs
 )
+ament_target_dependencies(rb_safety_node
+  rclcpp
+  sensor_msgs
+)
 
-install(TARGETS rb_controller_node
+install(TARGETS rb_controller_node rb_safety_node
   DESTINATION lib/${PROJECT_NAME}
 )
 
