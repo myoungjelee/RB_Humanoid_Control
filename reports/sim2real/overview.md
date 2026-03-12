@@ -26,14 +26,14 @@ Stage1(`reports/stage1/*`)은 baseline 증거로 유지하고, 본 문서는 메
 - `/rb/joint_states` publish 확인
 - `/rb/imu` publish 확인
 - `use_sim_time` 동작 확인
-- 증빙 이미지: `reports/sim2real/images/m1.png`
+- 증빙 이미지: `reports/sim2real/images/legacy_backend/m1.png`
 - 저장 stage: `sim/isaac_scenes/g1_stage.usd`
 
 ## 5) 완료 항목(M2)
 - `rb_controller` C++ 패키지 생성/빌드 완료
 - 0 torque publish(`/rb/command_raw`) 확인
 - dt/jitter 통계 출력(`dt_mean/dt_max/p95/miss_count`) 확인
-- 증빙 이미지: `reports/sim2real/images/m2_controller.png`
+- 증빙 이미지: `reports/sim2real/images/legacy_backend/m2_controller.png`
 
 ## 6) 완료 항목(M3)
 - OmniGraph command apply 경로 구성:
@@ -42,7 +42,7 @@ Stage1(`reports/stage1/*`)은 baseline 증거로 유지하고, 본 문서는 메
 - `command_apply=True` 그래프 구성 로그 확인
 - `/rb/command_raw` 200Hz 근처 발행 확인
 - `/rb/joint_states` before/after diff 변화 확인
-- 증빙 이미지: `reports/sim2real/images/m3_command.png`
+- 증빙 이미지: `reports/sim2real/images/legacy_backend/m3_command.png`
 - 보조 로그: `logs/sim2real/m3/*`
 
 ## 7) 다음 검증 항목(M4)

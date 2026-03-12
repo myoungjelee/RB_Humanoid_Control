@@ -1,49 +1,90 @@
 rb_controller:
   ros__parameters:
+    # 제어/감시 기준 주기는 200Hz로 유지한다.
+    control_rate_hz: 200.0
+    # 기본 시작부터 stand_pd를 사용해 M5 기본 실행 경로를 고정한다.
     signal_mode: stand_pd
-    stand_kp: 20.0
-    stand_kd: 6.0
-    stand_effort_abs_max: 8.0
-    stand_hold_current_on_start: false
-    stand_q_ref:
+    stand_kp: 6.0
+    stand_kd: 8.0
+    stand_effort_abs_max: 1.4
+    stand_hold_current_on_start: true
+    # 길이 1([0.0])은 런타임에 현재 관절값을 기준 자세로 캡처하도록 사용하는 센티널이다.
+    stand_q_ref: [0.0]
+    # M5 안정화 1차: 하체 + 몸통만 stand_pd를 적용해 발산원을 줄인다.
+    stand_control_joints:
       [
-        -0.1868,
-        -0.1859,
-        0.0001,
-        -0.0001,
-        0.0,
-        0.3439,
-        0.3441,
-        0.0004,
-        0.0005,
-        0.1365,
-        -0.1365,
-        0.5009,
-        0.4996,
-        -0.0048,
-        0.0046,
-        -0.3917,
-        -0.3912,
-        0.8894,
-        0.8893,
-        0.0009,
-        0.0009,
-        0.0002,
-        -0.0002,
-        -0.0001,
-        -0.0001,
-        -0.0001,
-        0.0001,
-        0.0001,
-        -0.0001,
-        -0.0096,
-        -0.0096,
-        1.0002,
-        0.0096,
-        0.0096,
-        -1.0002,
-        0.52,
-        -0.52,
+        left_hip_pitch_joint,
+        right_hip_pitch_joint,
+        torso_joint,
+        left_hip_roll_joint,
+        right_hip_roll_joint,
+        left_hip_yaw_joint,
+        right_hip_yaw_joint,
+        left_knee_joint,
+        right_knee_joint,
+        left_ankle_pitch_joint,
+        right_ankle_pitch_joint,
+        left_ankle_roll_joint,
+        right_ankle_roll_joint,
+      ]
+    # stand_guard: 과한 복귀토크와 과도 기울기 구간 출력을 제한한다.
+    stand_pos_error_abs_max: 0.18
+    stand_tilt_cut_enable: true
+    stand_tilt_cut_rad: 0.40
+    stand_tilt_recover_rad: 0.30
+    stand_tilt_cut_output_scale: 0.30
+    # soft-limit 회피: 한계 근처에서 해당 방향으로 밀어내는 effort를 줄인다.
+    limit_avoid_enable: true
+    limit_avoid_margin_rad: 0.08
+    limit_avoid_kp: 10.0
+    limit_avoid_kd: 2.0
+    limit_avoid_joint_names:
+      [
+        left_hip_pitch_joint,
+        right_hip_pitch_joint,
+        torso_joint,
+        left_hip_roll_joint,
+        right_hip_roll_joint,
+        left_hip_yaw_joint,
+        right_hip_yaw_joint,
+        left_knee_joint,
+        right_knee_joint,
+        left_ankle_pitch_joint,
+        right_ankle_pitch_joint,
+        left_ankle_roll_joint,
+        right_ankle_roll_joint,
+      ]
+    limit_avoid_lower:
+      [
+        -2.349999711181,
+        -2.349999711181,
+        -2.618000003262,
+        -0.259999973074,
+        -2.529999839782,
+        -2.749999849008,
+        -2.749999849008,
+        -0.334889977074,
+        -0.334889977074,
+        -0.75,
+        -0.75,
+        -0.261799970366,
+        -0.261799970366,
+      ]
+    limit_avoid_upper:
+      [
+        3.049999885799,
+        3.049999885799,
+        2.618000003262,
+        2.529999839782,
+        0.259999973074,
+        2.749999849008,
+        2.749999849008,
+        2.544899693449,
+        2.544899693449,
+        0.729999951929,
+        0.729999951929,
+        0.261799970366,
+        0.261799970366,
       ]
 
 rb_safety:
@@ -79,7 +120,7 @@ rb_safety:
         lower: -0.334889977074
         upper: 2.544899693449
       left_ankle_pitch_joint:
-        lower: -0.67999996799
+        lower: -0.75
         upper: 0.729999951929
       left_ankle_roll_joint:
         lower: -0.261799970366
@@ -94,7 +135,7 @@ rb_safety:
         lower: -0.334889977074
         upper: 2.544899693449
       right_ankle_pitch_joint:
-        lower: -0.67999996799
+        lower: -0.75
         upper: 0.729999951929
       right_ankle_roll_joint:
         lower: -0.261799970366

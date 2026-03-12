@@ -1,0 +1,34 @@
+session_name: rb_m1_sensor
+start_directory: /home/leemou/Projects/RB_Humanoid_Control
+shell_command_before:
+  - export RUN_ID="${RUN_ID:?Set RUN_ID before tmuxp load}"
+  - export BASE="$HOME/Projects/RB_Humanoid_Control/logs/sim2real/$RUN_ID"
+  - mkdir -p "$BASE/m1"
+windows:
+  - window_name: m1_sensor
+    layout: main-vertical
+    panes:
+      - shell_command:
+          - cd /home/leemou/Projects/RB_Humanoid_Control
+          - python main.py --phase m1_sensor 2>&1 | tee "$BASE/m1/isaac.log"
+      - shell_command:
+          - cd /home/leemou/Projects/RB_Humanoid_Control/ros2_ws
+          - source /opt/ros/humble/setup.bash
+          - source install/setup.bash
+          - echo "[WAIT] sleeping 15s for Isaac startup"
+          - sleep 15
+          - until timeout 1 ros2 topic echo --once /clock >/dev/null 2>&1; do echo "[WAIT] /clock not ready yet"; sleep 1; done
+          - ros2 topic list | tee "$BASE/m1/topic_list.txt"
+          - timeout 12 ros2 topic hz /rb/joint_states | tee "$BASE/m1/joint_states_hz.txt"
+          - exec bash
+      - shell_command:
+          - cd /home/leemou/Projects/RB_Humanoid_Control/ros2_ws
+          - source /opt/ros/humble/setup.bash
+          - source install/setup.bash
+          - echo "[WAIT] sleeping 15s for Isaac startup"
+          - sleep 15
+          - until timeout 1 ros2 topic echo --once /clock >/dev/null 2>&1; do echo "[WAIT] /clock not ready yet"; sleep 1; done
+          - ros2 topic echo --once /rb/imu | tee "$BASE/m1/imu_once.txt"
+          - ros2 topic echo --once /clock | tee "$BASE/m1/clock_once.txt"
+          - echo "[CAPTURE] topic_list + joint_states_hz + imu/clock echo"
+          - exec bash

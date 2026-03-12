@@ -43,11 +43,14 @@ def _stage_has_prim(path: str) -> bool:
 
 def _resolve_robot_prim(env: Any, override: str | None) -> str:
     """robot prim 경로를 자동 탐색하거나 override 값을 사용한다."""
-    if override:
-        return _normalize_prim_path(override)
+    normalized_override = _normalize_prim_path(override) if override else None
+    if normalized_override and _stage_has_prim(normalized_override):
+        return normalized_override
 
     scene = getattr(getattr(env, "unwrapped", env), "scene", None)
     if scene is None:
+        if normalized_override:
+            return normalized_override
         raise RuntimeError("Failed to resolve robot prim: env.scene missing")
 
     entity = None
@@ -85,6 +88,8 @@ def _resolve_robot_prim(env: Any, override: str | None) -> str:
         raise RuntimeError("Failed to resolve robot prim: no prim path candidate")
 
     normalized = [_normalize_prim_path(path) for path in candidates]
+    if normalized_override and normalized_override not in normalized:
+        normalized.insert(0, normalized_override)
 
     # IsaacLab 자산에서 /Robot는 컨테이너이고 실제 articulation root가 /pelvis인 경우가 많다.
     # 따라서 /Robot 경로가 있으면 자식(root 후보)을 먼저 우선시한다.
@@ -227,14 +232,6 @@ def _build_sensor_graph(
                     (
                         "JointStateSub.outputs:jointNames",
                         "ArticulationController.inputs:jointNames",
-                    ),
-                    (
-                        "JointStateSub.outputs:positionCommand",
-                        "ArticulationController.inputs:positionCommand",
-                    ),
-                    (
-                        "JointStateSub.outputs:velocityCommand",
-                        "ArticulationController.inputs:velocityCommand",
                     ),
                     (
                         "JointStateSub.outputs:effortCommand",

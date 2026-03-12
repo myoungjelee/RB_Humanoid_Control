@@ -1,13 +1,20 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <cstdint>
 #include <cstddef>
 #include <memory>
 #include <numeric>
+#include <limits>
+#include <sstream>
 #include <string>
+#include <unordered_set>
+#include <utility>
 #include <vector>
 
 #include "rclcpp/rclcpp.hpp"
+#include "rcl_interfaces/msg/set_parameters_result.hpp"
+#include "sensor_msgs/msg/imu.hpp"
 #include "sensor_msgs/msg/joint_state.hpp"
 
 // 200Hz 제어 루프 타이밍을 측정하고, 테스트/스탠드 명령(/rb/command_raw)을 퍼블리시하는 노드
@@ -45,8 +52,62 @@ public:
     stand_kd_ = this->declare_parameter<double>("stand_kd", 2.0);
     stand_effort_abs_max_ = this->declare_parameter<double>("stand_effort_abs_max", 6.0);
     stand_hold_current_on_start_ = this->declare_parameter<bool>("stand_hold_current_on_start", true);
+    // 그룹별 게인 스케일: base stand_kp/kd에 곱해 관절군별로 반응을 다르게 만든다.
+    stand_kp_scale_hip_ = this->declare_parameter<double>("stand_kp_scale_hip", 1.0);
+    stand_kd_scale_hip_ = this->declare_parameter<double>("stand_kd_scale_hip", 1.0);
+    stand_kp_scale_knee_ = this->declare_parameter<double>("stand_kp_scale_knee", 1.0);
+    stand_kd_scale_knee_ = this->declare_parameter<double>("stand_kd_scale_knee", 1.0);
+    stand_kp_scale_ankle_ = this->declare_parameter<double>("stand_kp_scale_ankle", 1.0);
+    stand_kd_scale_ankle_ = this->declare_parameter<double>("stand_kd_scale_ankle", 1.0);
+    stand_kp_scale_torso_ = this->declare_parameter<double>("stand_kp_scale_torso", 1.0);
+    stand_kd_scale_torso_ = this->declare_parameter<double>("stand_kd_scale_torso", 1.0);
+    stand_kp_scale_other_ = this->declare_parameter<double>("stand_kp_scale_other", 1.0);
+    stand_kd_scale_other_ = this->declare_parameter<double>("stand_kd_scale_other", 1.0);
     stand_q_ref_param_ =
         this->declare_parameter<std::vector<double>>("stand_q_ref", std::vector<double>{});
+    // 비어 있으면 모든 조인트를 제어한다. 값이 있으면 지정한 조인트만 stand_pd를 적용한다.
+    stand_control_joints_param_ =
+        this->declare_parameter<std::vector<std::string>>("stand_control_joints", std::vector<std::string>{});
+    // 오차 클램프: q_ref와 현재 각도 차이가 큰 구간에서 과한 복귀토크를 억제한다.
+    stand_pos_error_abs_max_ = this->declare_parameter<double>("stand_pos_error_abs_max", 0.35);
+    // tilt cut: 과도 기울기에서는 stand 출력 스케일을 낮춰 관절 한계 충돌을 완화한다.
+    stand_tilt_cut_enable_ = this->declare_parameter<bool>("stand_tilt_cut_enable", true);
+    stand_tilt_cut_rad_ = this->declare_parameter<double>("stand_tilt_cut_rad", 0.45);
+    stand_tilt_recover_rad_ = this->declare_parameter<double>("stand_tilt_recover_rad", 0.35);
+    stand_tilt_cut_output_scale_ = this->declare_parameter<double>("stand_tilt_cut_output_scale", 0.0);
+    // 관측 로그: loop_stats에 stand 오차 상위 N개 조인트를 함께 출력한다.
+    const auto stand_debug_top_error_count_param =
+        this->declare_parameter<int64_t>("stand_debug_top_error_count", 3);
+    stand_debug_top_error_count_ = static_cast<std::size_t>(std::max<int64_t>(0, stand_debug_top_error_count_param));
+    // soft-limit 회피: joint limit 근접 시 한계 방향으로 더 밀지 않도록 보정한다.
+    limit_avoid_enable_ = this->declare_parameter<bool>("limit_avoid_enable", false);
+    limit_avoid_margin_rad_ = this->declare_parameter<double>("limit_avoid_margin_rad", 0.05);
+    limit_avoid_kp_ = this->declare_parameter<double>("limit_avoid_kp", 8.0);
+    limit_avoid_kd_ = this->declare_parameter<double>("limit_avoid_kd", 1.0);
+    limit_avoid_joint_names_param_ =
+        this->declare_parameter<std::vector<std::string>>("limit_avoid_joint_names", std::vector<std::string>{});
+    limit_avoid_lower_param_ =
+        this->declare_parameter<std::vector<double>>("limit_avoid_lower", std::vector<double>{});
+    limit_avoid_upper_param_ =
+        this->declare_parameter<std::vector<double>>("limit_avoid_upper", std::vector<double>{});
+    imu_topic_ = this->declare_parameter<std::string>("input_imu_topic", "/rb/imu");
+    enable_tilt_feedback_ = this->declare_parameter<bool>("enable_tilt_feedback", true);
+    tilt_kp_roll_ = this->declare_parameter<double>("tilt_kp_roll", 10.0);
+    tilt_kd_roll_ = this->declare_parameter<double>("tilt_kd_roll", 2.0);
+    tilt_kp_pitch_ = this->declare_parameter<double>("tilt_kp_pitch", 12.0);
+    tilt_kd_pitch_ = this->declare_parameter<double>("tilt_kd_pitch", 2.5);
+    tilt_deadband_rad_ = this->declare_parameter<double>("tilt_deadband_rad", 0.03);
+    tilt_effort_abs_max_ = this->declare_parameter<double>("tilt_effort_abs_max", 1.8);
+    tilt_roll_sign_ = this->declare_parameter<double>("tilt_roll_sign", 1.0);
+    tilt_pitch_sign_ = this->declare_parameter<double>("tilt_pitch_sign", 1.0);
+    // tilt 보정 분배 가중치: 축별로 어느 관절군이 얼마나 보정을 담당할지 결정한다.
+    tilt_weight_roll_hip_ = this->declare_parameter<double>("tilt_weight_roll_hip", 0.7);
+    tilt_weight_roll_ankle_ = this->declare_parameter<double>("tilt_weight_roll_ankle", 0.3);
+    tilt_weight_roll_torso_ = this->declare_parameter<double>("tilt_weight_roll_torso", 0.0);
+    tilt_weight_pitch_hip_ = this->declare_parameter<double>("tilt_weight_pitch_hip", 0.6);
+    tilt_weight_pitch_ankle_ = this->declare_parameter<double>("tilt_weight_pitch_ankle", 0.3);
+    tilt_weight_pitch_knee_ = this->declare_parameter<double>("tilt_weight_pitch_knee", 0.1);
+    tilt_weight_pitch_torso_ = this->declare_parameter<double>("tilt_weight_pitch_torso", 0.0);
 
     if (control_rate_hz_ <= 0.0)
     {
@@ -81,6 +142,76 @@ public:
     {
       stand_effort_abs_max_ = std::abs(stand_effort_abs_max_);
     }
+    stand_kp_scale_hip_ = std::max(0.0, stand_kp_scale_hip_);
+    stand_kd_scale_hip_ = std::max(0.0, stand_kd_scale_hip_);
+    stand_kp_scale_knee_ = std::max(0.0, stand_kp_scale_knee_);
+    stand_kd_scale_knee_ = std::max(0.0, stand_kd_scale_knee_);
+    stand_kp_scale_ankle_ = std::max(0.0, stand_kp_scale_ankle_);
+    stand_kd_scale_ankle_ = std::max(0.0, stand_kd_scale_ankle_);
+    stand_kp_scale_torso_ = std::max(0.0, stand_kp_scale_torso_);
+    stand_kd_scale_torso_ = std::max(0.0, stand_kd_scale_torso_);
+    stand_kp_scale_other_ = std::max(0.0, stand_kp_scale_other_);
+    stand_kd_scale_other_ = std::max(0.0, stand_kd_scale_other_);
+    if (stand_pos_error_abs_max_ < 0.0)
+    {
+      stand_pos_error_abs_max_ = 0.0;
+    }
+    if (stand_tilt_cut_rad_ < 0.0)
+    {
+      stand_tilt_cut_rad_ = 0.0;
+    }
+    if (stand_tilt_recover_rad_ < 0.0)
+    {
+      stand_tilt_recover_rad_ = 0.0;
+    }
+    if (stand_tilt_recover_rad_ > stand_tilt_cut_rad_)
+    {
+      stand_tilt_recover_rad_ = stand_tilt_cut_rad_;
+    }
+    stand_tilt_cut_output_scale_ = std::clamp(stand_tilt_cut_output_scale_, 0.0, 1.0);
+    if (limit_avoid_margin_rad_ < 0.0)
+    {
+      limit_avoid_margin_rad_ = 0.0;
+    }
+    if (limit_avoid_kp_ < 0.0)
+    {
+      limit_avoid_kp_ = 0.0;
+    }
+    if (limit_avoid_kd_ < 0.0)
+    {
+      limit_avoid_kd_ = 0.0;
+    }
+    if (tilt_kp_roll_ < 0.0)
+    {
+      tilt_kp_roll_ = 0.0;
+    }
+    if (tilt_kd_roll_ < 0.0)
+    {
+      tilt_kd_roll_ = 0.0;
+    }
+    if (tilt_kp_pitch_ < 0.0)
+    {
+      tilt_kp_pitch_ = 0.0;
+    }
+    if (tilt_kd_pitch_ < 0.0)
+    {
+      tilt_kd_pitch_ = 0.0;
+    }
+    if (tilt_deadband_rad_ < 0.0)
+    {
+      tilt_deadband_rad_ = 0.0;
+    }
+    if (tilt_effort_abs_max_ < 0.0)
+    {
+      tilt_effort_abs_max_ = std::abs(tilt_effort_abs_max_);
+    }
+    tilt_weight_roll_hip_ = std::max(0.0, tilt_weight_roll_hip_);
+    tilt_weight_roll_ankle_ = std::max(0.0, tilt_weight_roll_ankle_);
+    tilt_weight_roll_torso_ = std::max(0.0, tilt_weight_roll_torso_);
+    tilt_weight_pitch_hip_ = std::max(0.0, tilt_weight_pitch_hip_);
+    tilt_weight_pitch_ankle_ = std::max(0.0, tilt_weight_pitch_ankle_);
+    tilt_weight_pitch_knee_ = std::max(0.0, tilt_weight_pitch_knee_);
+    tilt_weight_pitch_torso_ = std::max(0.0, tilt_weight_pitch_torso_);
     // 200Hz 기준 expected dt = 0.005s
     expected_dt_sec_ = 1.0 / control_rate_hz_;
 
@@ -89,12 +220,17 @@ public:
     joint_state_sub_ = this->create_subscription<sensor_msgs::msg::JointState>(
         input_topic_, 10,
         std::bind(&RbControllerNode::on_joint_state, this, std::placeholders::_1));
+    imu_sub_ = this->create_subscription<sensor_msgs::msg::Imu>(
+        imu_topic_, 20, std::bind(&RbControllerNode::on_imu, this, std::placeholders::_1));
 
     // wall-time 기반 고정 주기 타이머(best-effort)
     using namespace std::chrono;
     const auto timer_period = duration_cast<nanoseconds>(duration<double>(expected_dt_sec_));
     control_timer_ = this->create_wall_timer(
         timer_period, std::bind(&RbControllerNode::on_control_tick, this));
+    // 런타임 튜닝을 위해 ros2 param set 변경을 실제 제어 변수에 반영한다.
+    param_callback_handle_ = this->add_on_set_parameters_callback(
+        std::bind(&RbControllerNode::on_parameters_changed, this, std::placeholders::_1));
 
     RCLCPP_INFO(
         this->get_logger(),
@@ -102,6 +238,35 @@ public:
         control_rate_hz_, expected_dt_sec_, input_topic_.c_str(), output_topic_.c_str(), joint_names_.size(),
         signal_mode_.c_str(), target_joint_.c_str(), effort_amplitude_, effort_frequency_hz_,
         stand_kp_, stand_kd_, stand_effort_abs_max_);
+    RCLCPP_INFO(
+        this->get_logger(),
+        "stand_control_joints configured: count=%zu (empty means all joints)",
+        stand_control_joints_param_.size());
+    RCLCPP_INFO(
+        this->get_logger(),
+        "stand_guard error_max=%.3f tilt_cut=%s cut=%.3f recover=%.3f scale=%.2f top_err_n=%zu",
+        stand_pos_error_abs_max_,
+        stand_tilt_cut_enable_ ? "on" : "off",
+        stand_tilt_cut_rad_, stand_tilt_recover_rad_, stand_tilt_cut_output_scale_,
+        stand_debug_top_error_count_);
+    RCLCPP_INFO(
+        this->get_logger(),
+        "limit_avoid=%s margin=%.4f kp=%.3f kd=%.3f table=%zu",
+        limit_avoid_enable_ ? "on" : "off",
+        limit_avoid_margin_rad_, limit_avoid_kp_, limit_avoid_kd_, limit_avoid_joint_names_param_.size());
+    RCLCPP_INFO(
+        this->get_logger(),
+        "stand_group_scales kp(hip/knee/ankle/torso/other)=%.2f/%.2f/%.2f/%.2f/%.2f kd=%.2f/%.2f/%.2f/%.2f/%.2f",
+        stand_kp_scale_hip_, stand_kp_scale_knee_, stand_kp_scale_ankle_, stand_kp_scale_torso_, stand_kp_scale_other_,
+        stand_kd_scale_hip_, stand_kd_scale_knee_, stand_kd_scale_ankle_, stand_kd_scale_torso_, stand_kd_scale_other_);
+    RCLCPP_INFO(
+        this->get_logger(),
+        "tilt_feedback=%s imu_topic=%s kp_roll=%.3f kd_roll=%.3f kp_pitch=%.3f kd_pitch=%.3f deadband=%.4f max=%.3f sign(r/p)=%.1f/%.1f weights roll(h/a/t)=%.2f/%.2f/%.2f pitch(h/a/k/t)=%.2f/%.2f/%.2f/%.2f",
+        enable_tilt_feedback_ ? "on" : "off", imu_topic_.c_str(),
+        tilt_kp_roll_, tilt_kd_roll_, tilt_kp_pitch_, tilt_kd_pitch_,
+        tilt_deadband_rad_, tilt_effort_abs_max_, tilt_roll_sign_, tilt_pitch_sign_,
+        tilt_weight_roll_hip_, tilt_weight_roll_ankle_, tilt_weight_roll_torso_,
+        tilt_weight_pitch_hip_, tilt_weight_pitch_ankle_, tilt_weight_pitch_knee_, tilt_weight_pitch_torso_);
   }
 
 private:
@@ -123,6 +288,12 @@ private:
     {
       joint_names_ = msg->name;
       stand_reference_ready_ = false;
+      stand_control_mask_ready_ = false;
+      stand_gain_map_ready_ = false;
+      tilt_joint_index_ready_ = false;
+      tilt_joint_index_warned_ = false;
+      limit_avoid_map_ready_ = false;
+      limit_avoid_invalid_warned_ = false;
       RCLCPP_INFO(
           this->get_logger(),
           "joint_names updated from /rb/joint_states: count=%zu", joint_names_.size());
@@ -142,6 +313,38 @@ private:
       latest_joint_velocities_[i] = msg->velocity[i];
     }
     joint_state_received_ = true;
+  }
+
+  /**
+   * @brief /rb/imu에서 roll/pitch와 각속도를 캐시한다.
+   * @param msg 수신된 IMU 메시지
+   */
+  void on_imu(const sensor_msgs::msg::Imu::SharedPtr msg)
+  {
+    if (!msg)
+    {
+      return;
+    }
+
+    const double x = msg->orientation.x;
+    const double y = msg->orientation.y;
+    const double z = msg->orientation.z;
+    const double w = msg->orientation.w;
+
+    const double sinr_cosp = 2.0 * (w * x + y * z);
+    const double cosr_cosp = 1.0 - 2.0 * (x * x + y * y);
+    const double roll = std::atan2(sinr_cosp, cosr_cosp);
+
+    const double sinp = 2.0 * (w * y - z * x);
+    const double pitch = (std::abs(sinp) >= 1.0)
+                             ? std::copysign(1.5707963267948966, sinp)
+                             : std::asin(sinp);
+
+    imu_roll_rad_ = roll;
+    imu_pitch_rad_ = pitch;
+    imu_roll_rate_rad_s_ = msg->angular_velocity.x;
+    imu_pitch_rate_rad_s_ = msg->angular_velocity.y;
+    imu_received_ = true;
   }
 
   /**
@@ -167,15 +370,27 @@ private:
     }
     steady_prev_tick_ = now_steady;
 
-    // 기본은 zero command, signal_mode에 따라 테스트 신호/stand 제어를 추가한다.
+    // Sim-to-Real 트랙은 effort-only 명령 경로를 기준으로 한다.
+    // position/velocity 배열을 0으로 채우면 articulation이 다중 인터페이스 명령을 동시에
+    // 받게 되므로, effort 외 필드는 비워둔다.
     sensor_msgs::msg::JointState cmd_msg;
     cmd_msg.header.stamp = this->now();
     cmd_msg.name = joint_names_;
 
     const std::size_t joint_count = joint_names_.size();
-    cmd_msg.position.assign(joint_count, 0.0);
-    cmd_msg.velocity.assign(joint_count, 0.0);
     cmd_msg.effort.assign(joint_count, 0.0);
+    last_stand_output_scale_ = 1.0;
+    // 관측용 tilt 진단 스냅샷은 매 주기 초기화 후, 적용된 값만 채운다.
+    last_tilt_dbg_pitch_input_rad_ = std::numeric_limits<double>::quiet_NaN();
+    last_tilt_dbg_pitch_rate_rad_s_ = std::numeric_limits<double>::quiet_NaN();
+    last_tilt_dbg_u_pitch_p_term_ = std::numeric_limits<double>::quiet_NaN();
+    last_tilt_dbg_u_pitch_d_term_ = std::numeric_limits<double>::quiet_NaN();
+    last_tilt_dbg_u_pitch_raw_ = std::numeric_limits<double>::quiet_NaN();
+    last_tilt_dbg_u_pitch_clamped_ = std::numeric_limits<double>::quiet_NaN();
+    last_tilt_dbg_pitch_alloc_hip_ = std::numeric_limits<double>::quiet_NaN();
+    last_tilt_dbg_pitch_alloc_ankle_ = std::numeric_limits<double>::quiet_NaN();
+    last_tilt_dbg_pitch_alloc_knee_ = std::numeric_limits<double>::quiet_NaN();
+    last_tilt_dbg_pitch_alloc_torso_ = std::numeric_limits<double>::quiet_NaN();
     apply_excitation(cmd_msg, now_steady);
 
     if (joint_count == 0U)
@@ -203,6 +418,58 @@ private:
    *
    * 출력 항목: dt_mean, dt_max, dt_p95, miss_window, miss_total, samples
    */
+  std::string summarize_top_stand_error_joints(std::size_t top_n) const
+  {
+    if (top_n == 0U || signal_mode_ != "stand_pd" ||
+        !joint_state_received_ || !stand_reference_ready_ || !stand_control_mask_ready_)
+    {
+      return "-";
+    }
+
+    const std::size_t usable_count = std::min(
+        std::min(joint_names_.size(), latest_joint_positions_.size()),
+        std::min(stand_q_ref_active_.size(), stand_control_mask_.size()));
+    if (usable_count == 0U)
+    {
+      return "-";
+    }
+
+    std::vector<std::pair<double, std::size_t>> abs_error_and_index;
+    abs_error_and_index.reserve(usable_count);
+    for (std::size_t i = 0; i < usable_count; ++i)
+    {
+      if (stand_control_mask_[i] == 0U)
+      {
+        continue;
+      }
+      const double error = stand_q_ref_active_[i] - latest_joint_positions_[i];
+      abs_error_and_index.emplace_back(std::abs(error), i);
+    }
+    if (abs_error_and_index.empty())
+    {
+      return "-";
+    }
+
+    std::sort(
+        abs_error_and_index.begin(), abs_error_and_index.end(),
+        [](const auto & a, const auto & b)
+        { return a.first > b.first; });
+
+    const std::size_t take_n = std::min(top_n, abs_error_and_index.size());
+    std::ostringstream oss;
+    for (std::size_t rank = 0; rank < take_n; ++rank)
+    {
+      const std::size_t i = abs_error_and_index[rank].second;
+      const double signed_error = stand_q_ref_active_[i] - latest_joint_positions_[i];
+      if (rank > 0U)
+      {
+        oss << ",";
+      }
+      oss << joint_names_[i] << ":" << signed_error;
+    }
+    return oss.str();
+  }
+
   void log_timing_stats()
   {
     // 수집된 dt 샘플이 없으면 통계 생략
@@ -217,11 +484,20 @@ private:
     const double mean = sum / static_cast<double>(dt_samples_sec_.size());
     const double max_dt = *std::max_element(dt_samples_sec_.begin(), dt_samples_sec_.end());
     const double p95 = percentile(dt_samples_sec_, 0.95);
+    const double tilt_roll = imu_received_ ? imu_roll_rad_ : std::numeric_limits<double>::quiet_NaN();
+    const double tilt_pitch = imu_received_ ? imu_pitch_rad_ : std::numeric_limits<double>::quiet_NaN();
+    const std::string top_error = summarize_top_stand_error_joints(stand_debug_top_error_count_);
 
     RCLCPP_INFO(
         this->get_logger(),
-        "loop_stats dt_mean=%.6f dt_max=%.6f dt_p95=%.6f miss_window=%zu miss_total=%zu samples=%zu",
-        mean, max_dt, p95, miss_count_window_, miss_count_total_, dt_samples_sec_.size());
+        "loop_stats dt_mean=%.6f dt_max=%.6f dt_p95=%.6f miss_window=%zu miss_total=%zu samples=%zu tilt_r=%.3f tilt_p=%.3f stand_scale=%.2f top_err=%s pitch_rate=%.3f u_pitch_raw=%.3f u_pitch=%.3f u_pitch_p=%.3f u_pitch_d=%.3f alloc_p(h/a/k/t)=%.3f/%.3f/%.3f/%.3f",
+        mean, max_dt, p95, miss_count_window_, miss_count_total_, dt_samples_sec_.size(),
+        tilt_roll, tilt_pitch, last_stand_output_scale_, top_error.c_str(),
+        last_tilt_dbg_pitch_rate_rad_s_,
+        last_tilt_dbg_u_pitch_raw_, last_tilt_dbg_u_pitch_clamped_,
+        last_tilt_dbg_u_pitch_p_term_, last_tilt_dbg_u_pitch_d_term_,
+        last_tilt_dbg_pitch_alloc_hip_, last_tilt_dbg_pitch_alloc_ankle_,
+        last_tilt_dbg_pitch_alloc_knee_, last_tilt_dbg_pitch_alloc_torso_);
   }
 
   /**
@@ -252,6 +528,632 @@ private:
     const std::size_t n = sorted.size();
     const auto idx = static_cast<std::size_t>(std::ceil(ratio * static_cast<double>(n)) - 1.0);
     return sorted[std::min(idx, n - 1U)];
+  }
+
+  /**
+   * @brief ros2 param set 요청을 검증하고 런타임 변수에 즉시 반영한다.
+   * @param params 변경 요청된 파라미터 목록
+   * @return 적용 성공/실패 결과
+   */
+  rcl_interfaces::msg::SetParametersResult on_parameters_changed(
+      const std::vector<rclcpp::Parameter> &params)
+  {
+    rcl_interfaces::msg::SetParametersResult result;
+    result.successful = true;
+    result.reason = "ok";
+
+    for (const auto &param : params)
+    {
+      const std::string &name = param.get_name();
+
+      if (name == "control_rate_hz" || name == "input_joint_states_topic" || name == "output_command_raw_topic")
+      {
+        result.successful = false;
+        result.reason = "runtime update not supported for control_rate_hz/topic parameters (restart required)";
+        return result;
+      }
+      if (name == "input_imu_topic")
+      {
+        result.successful = false;
+        result.reason = "runtime update not supported for input_imu_topic (restart required)";
+        return result;
+      }
+
+      if (name == "signal_mode")
+      {
+        const std::string mode = param.as_string();
+        if (mode != "zero" && mode != "sine_effort" && mode != "step_effort" && mode != "stand_pd")
+        {
+          result.successful = false;
+          result.reason = "signal_mode must be one of zero|sine_effort|step_effort|stand_pd";
+          return result;
+        }
+        signal_mode_ = mode;
+        excitation_started_ = false;
+        continue;
+      }
+      if (name == "target_joint")
+      {
+        target_joint_ = param.as_string();
+        continue;
+      }
+      if (name == "effort_amplitude")
+      {
+        effort_amplitude_ = param.as_double();
+        continue;
+      }
+      if (name == "effort_frequency_hz")
+      {
+        const double v = param.as_double();
+        if (v < 0.0)
+        {
+          result.successful = false;
+          result.reason = "effort_frequency_hz must be >= 0";
+          return result;
+        }
+        effort_frequency_hz_ = v;
+        excitation_started_ = false;
+        continue;
+      }
+      if (name == "step_start_sec")
+      {
+        const double v = param.as_double();
+        if (v < 0.0)
+        {
+          result.successful = false;
+          result.reason = "step_start_sec must be >= 0";
+          return result;
+        }
+        step_start_sec_ = v;
+        excitation_started_ = false;
+        continue;
+      }
+      if (name == "stand_kp")
+      {
+        const double v = param.as_double();
+        if (v < 0.0)
+        {
+          result.successful = false;
+          result.reason = "stand_kp must be >= 0";
+          return result;
+        }
+        stand_kp_ = v;
+        continue;
+      }
+      if (name == "stand_kd")
+      {
+        const double v = param.as_double();
+        if (v < 0.0)
+        {
+          result.successful = false;
+          result.reason = "stand_kd must be >= 0";
+          return result;
+        }
+        stand_kd_ = v;
+        continue;
+      }
+      if (name == "stand_effort_abs_max")
+      {
+        const double v = param.as_double();
+        if (v < 0.0)
+        {
+          result.successful = false;
+          result.reason = "stand_effort_abs_max must be >= 0";
+          return result;
+        }
+        stand_effort_abs_max_ = v;
+        continue;
+      }
+      if (name == "stand_kp_scale_hip")
+      {
+        const double v = param.as_double();
+        if (v < 0.0)
+        {
+          result.successful = false;
+          result.reason = "stand_kp_scale_hip must be >= 0";
+          return result;
+        }
+        stand_kp_scale_hip_ = v;
+        stand_gain_map_ready_ = false;
+        continue;
+      }
+      if (name == "stand_kd_scale_hip")
+      {
+        const double v = param.as_double();
+        if (v < 0.0)
+        {
+          result.successful = false;
+          result.reason = "stand_kd_scale_hip must be >= 0";
+          return result;
+        }
+        stand_kd_scale_hip_ = v;
+        stand_gain_map_ready_ = false;
+        continue;
+      }
+      if (name == "stand_kp_scale_knee")
+      {
+        const double v = param.as_double();
+        if (v < 0.0)
+        {
+          result.successful = false;
+          result.reason = "stand_kp_scale_knee must be >= 0";
+          return result;
+        }
+        stand_kp_scale_knee_ = v;
+        stand_gain_map_ready_ = false;
+        continue;
+      }
+      if (name == "stand_kd_scale_knee")
+      {
+        const double v = param.as_double();
+        if (v < 0.0)
+        {
+          result.successful = false;
+          result.reason = "stand_kd_scale_knee must be >= 0";
+          return result;
+        }
+        stand_kd_scale_knee_ = v;
+        stand_gain_map_ready_ = false;
+        continue;
+      }
+      if (name == "stand_kp_scale_ankle")
+      {
+        const double v = param.as_double();
+        if (v < 0.0)
+        {
+          result.successful = false;
+          result.reason = "stand_kp_scale_ankle must be >= 0";
+          return result;
+        }
+        stand_kp_scale_ankle_ = v;
+        stand_gain_map_ready_ = false;
+        continue;
+      }
+      if (name == "stand_kd_scale_ankle")
+      {
+        const double v = param.as_double();
+        if (v < 0.0)
+        {
+          result.successful = false;
+          result.reason = "stand_kd_scale_ankle must be >= 0";
+          return result;
+        }
+        stand_kd_scale_ankle_ = v;
+        stand_gain_map_ready_ = false;
+        continue;
+      }
+      if (name == "stand_kp_scale_torso")
+      {
+        const double v = param.as_double();
+        if (v < 0.0)
+        {
+          result.successful = false;
+          result.reason = "stand_kp_scale_torso must be >= 0";
+          return result;
+        }
+        stand_kp_scale_torso_ = v;
+        stand_gain_map_ready_ = false;
+        continue;
+      }
+      if (name == "stand_kd_scale_torso")
+      {
+        const double v = param.as_double();
+        if (v < 0.0)
+        {
+          result.successful = false;
+          result.reason = "stand_kd_scale_torso must be >= 0";
+          return result;
+        }
+        stand_kd_scale_torso_ = v;
+        stand_gain_map_ready_ = false;
+        continue;
+      }
+      if (name == "stand_kp_scale_other")
+      {
+        const double v = param.as_double();
+        if (v < 0.0)
+        {
+          result.successful = false;
+          result.reason = "stand_kp_scale_other must be >= 0";
+          return result;
+        }
+        stand_kp_scale_other_ = v;
+        stand_gain_map_ready_ = false;
+        continue;
+      }
+      if (name == "stand_kd_scale_other")
+      {
+        const double v = param.as_double();
+        if (v < 0.0)
+        {
+          result.successful = false;
+          result.reason = "stand_kd_scale_other must be >= 0";
+          return result;
+        }
+        stand_kd_scale_other_ = v;
+        stand_gain_map_ready_ = false;
+        continue;
+      }
+      if (name == "stand_hold_current_on_start")
+      {
+        stand_hold_current_on_start_ = param.as_bool();
+        stand_reference_ready_ = false;
+        stand_ref_param_size_warned_ = false;
+        continue;
+      }
+      if (name == "stand_q_ref")
+      {
+        stand_q_ref_param_ = param.as_double_array();
+        stand_reference_ready_ = false;
+        stand_ref_param_size_warned_ = false;
+        continue;
+      }
+      if (name == "stand_control_joints")
+      {
+        stand_control_joints_param_ = param.as_string_array();
+        stand_control_mask_ready_ = false;
+        stand_control_unknown_warned_ = false;
+        stand_gain_map_ready_ = false;
+        continue;
+      }
+      if (name == "stand_pos_error_abs_max")
+      {
+        const double v = param.as_double();
+        if (v < 0.0)
+        {
+          result.successful = false;
+          result.reason = "stand_pos_error_abs_max must be >= 0";
+          return result;
+        }
+        stand_pos_error_abs_max_ = v;
+        continue;
+      }
+      if (name == "stand_tilt_cut_enable")
+      {
+        stand_tilt_cut_enable_ = param.as_bool();
+        if (!stand_tilt_cut_enable_)
+        {
+          stand_tilt_cut_active_ = false;
+        }
+        continue;
+      }
+      if (name == "stand_tilt_cut_rad")
+      {
+        const double v = param.as_double();
+        if (v < 0.0)
+        {
+          result.successful = false;
+          result.reason = "stand_tilt_cut_rad must be >= 0";
+          return result;
+        }
+        stand_tilt_cut_rad_ = v;
+        if (stand_tilt_recover_rad_ > stand_tilt_cut_rad_)
+        {
+          stand_tilt_recover_rad_ = stand_tilt_cut_rad_;
+        }
+        continue;
+      }
+      if (name == "stand_tilt_recover_rad")
+      {
+        const double v = param.as_double();
+        if (v < 0.0)
+        {
+          result.successful = false;
+          result.reason = "stand_tilt_recover_rad must be >= 0";
+          return result;
+        }
+        stand_tilt_recover_rad_ = std::min(v, stand_tilt_cut_rad_);
+        continue;
+      }
+      if (name == "stand_tilt_cut_output_scale")
+      {
+        const double v = param.as_double();
+        if (v < 0.0 || v > 1.0)
+        {
+          result.successful = false;
+          result.reason = "stand_tilt_cut_output_scale must be in [0,1]";
+          return result;
+        }
+        stand_tilt_cut_output_scale_ = v;
+        continue;
+      }
+      if (name == "stand_debug_top_error_count")
+      {
+        const int64_t v = param.as_int();
+        if (v < 0)
+        {
+          result.successful = false;
+          result.reason = "stand_debug_top_error_count must be >= 0";
+          return result;
+        }
+        stand_debug_top_error_count_ = static_cast<std::size_t>(v);
+        continue;
+      }
+      if (name == "limit_avoid_enable")
+      {
+        limit_avoid_enable_ = param.as_bool();
+        continue;
+      }
+      if (name == "limit_avoid_margin_rad")
+      {
+        const double v = param.as_double();
+        if (v < 0.0)
+        {
+          result.successful = false;
+          result.reason = "limit_avoid_margin_rad must be >= 0";
+          return result;
+        }
+        limit_avoid_margin_rad_ = v;
+        continue;
+      }
+      if (name == "limit_avoid_kp")
+      {
+        const double v = param.as_double();
+        if (v < 0.0)
+        {
+          result.successful = false;
+          result.reason = "limit_avoid_kp must be >= 0";
+          return result;
+        }
+        limit_avoid_kp_ = v;
+        continue;
+      }
+      if (name == "limit_avoid_kd")
+      {
+        const double v = param.as_double();
+        if (v < 0.0)
+        {
+          result.successful = false;
+          result.reason = "limit_avoid_kd must be >= 0";
+          return result;
+        }
+        limit_avoid_kd_ = v;
+        continue;
+      }
+      if (name == "limit_avoid_joint_names")
+      {
+        limit_avoid_joint_names_param_ = param.as_string_array();
+        limit_avoid_map_ready_ = false;
+        limit_avoid_invalid_warned_ = false;
+        continue;
+      }
+      if (name == "limit_avoid_lower")
+      {
+        limit_avoid_lower_param_ = param.as_double_array();
+        limit_avoid_map_ready_ = false;
+        limit_avoid_invalid_warned_ = false;
+        continue;
+      }
+      if (name == "limit_avoid_upper")
+      {
+        limit_avoid_upper_param_ = param.as_double_array();
+        limit_avoid_map_ready_ = false;
+        limit_avoid_invalid_warned_ = false;
+        continue;
+      }
+      if (name == "enable_tilt_feedback")
+      {
+        enable_tilt_feedback_ = param.as_bool();
+        continue;
+      }
+      if (name == "tilt_kp_roll")
+      {
+        const double v = param.as_double();
+        if (v < 0.0)
+        {
+          result.successful = false;
+          result.reason = "tilt_kp_roll must be >= 0";
+          return result;
+        }
+        tilt_kp_roll_ = v;
+        continue;
+      }
+      if (name == "tilt_kd_roll")
+      {
+        const double v = param.as_double();
+        if (v < 0.0)
+        {
+          result.successful = false;
+          result.reason = "tilt_kd_roll must be >= 0";
+          return result;
+        }
+        tilt_kd_roll_ = v;
+        continue;
+      }
+      if (name == "tilt_kp_pitch")
+      {
+        const double v = param.as_double();
+        if (v < 0.0)
+        {
+          result.successful = false;
+          result.reason = "tilt_kp_pitch must be >= 0";
+          return result;
+        }
+        tilt_kp_pitch_ = v;
+        continue;
+      }
+      if (name == "tilt_kd_pitch")
+      {
+        const double v = param.as_double();
+        if (v < 0.0)
+        {
+          result.successful = false;
+          result.reason = "tilt_kd_pitch must be >= 0";
+          return result;
+        }
+        tilt_kd_pitch_ = v;
+        continue;
+      }
+      if (name == "tilt_deadband_rad")
+      {
+        const double v = param.as_double();
+        if (v < 0.0)
+        {
+          result.successful = false;
+          result.reason = "tilt_deadband_rad must be >= 0";
+          return result;
+        }
+        tilt_deadband_rad_ = v;
+        continue;
+      }
+      if (name == "tilt_effort_abs_max")
+      {
+        const double v = param.as_double();
+        if (v < 0.0)
+        {
+          result.successful = false;
+          result.reason = "tilt_effort_abs_max must be >= 0";
+          return result;
+        }
+        tilt_effort_abs_max_ = v;
+        continue;
+      }
+      if (name == "tilt_roll_sign")
+      {
+        tilt_roll_sign_ = param.as_double();
+        continue;
+      }
+      if (name == "tilt_pitch_sign")
+      {
+        tilt_pitch_sign_ = param.as_double();
+        continue;
+      }
+      if (name == "tilt_weight_roll_hip")
+      {
+        const double v = param.as_double();
+        if (v < 0.0)
+        {
+          result.successful = false;
+          result.reason = "tilt_weight_roll_hip must be >= 0";
+          return result;
+        }
+        tilt_weight_roll_hip_ = v;
+        continue;
+      }
+      if (name == "tilt_weight_roll_ankle")
+      {
+        const double v = param.as_double();
+        if (v < 0.0)
+        {
+          result.successful = false;
+          result.reason = "tilt_weight_roll_ankle must be >= 0";
+          return result;
+        }
+        tilt_weight_roll_ankle_ = v;
+        continue;
+      }
+      if (name == "tilt_weight_roll_torso")
+      {
+        const double v = param.as_double();
+        if (v < 0.0)
+        {
+          result.successful = false;
+          result.reason = "tilt_weight_roll_torso must be >= 0";
+          return result;
+        }
+        tilt_weight_roll_torso_ = v;
+        continue;
+      }
+      if (name == "tilt_weight_pitch_hip")
+      {
+        const double v = param.as_double();
+        if (v < 0.0)
+        {
+          result.successful = false;
+          result.reason = "tilt_weight_pitch_hip must be >= 0";
+          return result;
+        }
+        tilt_weight_pitch_hip_ = v;
+        continue;
+      }
+      if (name == "tilt_weight_pitch_ankle")
+      {
+        const double v = param.as_double();
+        if (v < 0.0)
+        {
+          result.successful = false;
+          result.reason = "tilt_weight_pitch_ankle must be >= 0";
+          return result;
+        }
+        tilt_weight_pitch_ankle_ = v;
+        continue;
+      }
+      if (name == "tilt_weight_pitch_knee")
+      {
+        const double v = param.as_double();
+        if (v < 0.0)
+        {
+          result.successful = false;
+          result.reason = "tilt_weight_pitch_knee must be >= 0";
+          return result;
+        }
+        tilt_weight_pitch_knee_ = v;
+        continue;
+      }
+      if (name == "tilt_weight_pitch_torso")
+      {
+        const double v = param.as_double();
+        if (v < 0.0)
+        {
+          result.successful = false;
+          result.reason = "tilt_weight_pitch_torso must be >= 0";
+          return result;
+        }
+        tilt_weight_pitch_torso_ = v;
+        continue;
+      }
+      if (name == "log_interval_sec")
+      {
+        const double v = param.as_double();
+        if (v <= 0.0)
+        {
+          result.successful = false;
+          result.reason = "log_interval_sec must be > 0";
+          return result;
+        }
+        log_interval_sec_ = v;
+        continue;
+      }
+      if (name == "miss_ratio_threshold")
+      {
+        const double v = param.as_double();
+        if (v < 1.0)
+        {
+          result.successful = false;
+          result.reason = "miss_ratio_threshold must be >= 1.0";
+          return result;
+        }
+        miss_ratio_threshold_ = v;
+        continue;
+      }
+    }
+
+    RCLCPP_INFO(
+        this->get_logger(),
+        "runtime parameters updated: signal_mode=%s stand_kp=%.3f stand_kd=%.3f stand_limit=%.3f hold=%s q_ref_len=%zu ctrl_joint_count=%zu stand_scales kp(h/k/a/t/o)=%.2f/%.2f/%.2f/%.2f/%.2f kd=%.2f/%.2f/%.2f/%.2f/%.2f tilt_fb=%s kp(r/p)=%.3f/%.3f kd(r/p)=%.3f/%.3f deadband=%.4f max=%.3f sign(r/p)=%.1f/%.1f w_roll(h/a/t)=%.2f/%.2f/%.2f w_pitch(h/a/k/t)=%.2f/%.2f/%.2f/%.2f",
+        signal_mode_.c_str(), stand_kp_, stand_kd_, stand_effort_abs_max_,
+        stand_hold_current_on_start_ ? "true" : "false",
+        stand_q_ref_param_.size(), stand_control_joints_param_.size(),
+        stand_kp_scale_hip_, stand_kp_scale_knee_, stand_kp_scale_ankle_, stand_kp_scale_torso_, stand_kp_scale_other_,
+        stand_kd_scale_hip_, stand_kd_scale_knee_, stand_kd_scale_ankle_, stand_kd_scale_torso_, stand_kd_scale_other_,
+        enable_tilt_feedback_ ? "on" : "off",
+        tilt_kp_roll_, tilt_kp_pitch_, tilt_kd_roll_, tilt_kd_pitch_,
+        tilt_deadband_rad_, tilt_effort_abs_max_, tilt_roll_sign_, tilt_pitch_sign_,
+        tilt_weight_roll_hip_, tilt_weight_roll_ankle_, tilt_weight_roll_torso_,
+        tilt_weight_pitch_hip_, tilt_weight_pitch_ankle_, tilt_weight_pitch_knee_, tilt_weight_pitch_torso_);
+    RCLCPP_INFO(
+        this->get_logger(),
+        "runtime limit_avoid: enable=%s margin=%.4f kp=%.3f kd=%.3f table=%zu",
+        limit_avoid_enable_ ? "on" : "off",
+        limit_avoid_margin_rad_, limit_avoid_kp_, limit_avoid_kd_, limit_avoid_joint_names_param_.size());
+    RCLCPP_INFO(
+        this->get_logger(),
+        "runtime stand_guard: err_max=%.3f tilt_cut=%s cut=%.3f recover=%.3f scale=%.2f top_err_n=%zu",
+        stand_pos_error_abs_max_,
+        stand_tilt_cut_enable_ ? "on" : "off",
+        stand_tilt_cut_rad_, stand_tilt_recover_rad_, stand_tilt_cut_output_scale_,
+        stand_debug_top_error_count_);
+    return result;
   }
 
   /**
@@ -319,6 +1221,7 @@ private:
    */
   void apply_stand_pd(sensor_msgs::msg::JointState &cmd_msg)
   {
+    last_stand_output_scale_ = 1.0;
     if (!joint_state_received_)
     {
       RCLCPP_WARN_THROTTLE(
@@ -331,6 +1234,21 @@ private:
     {
       return;
     }
+    if (!ensure_stand_control_mask_ready())
+    {
+      return;
+    }
+    if (!ensure_stand_gain_map_ready())
+    {
+      return;
+    }
+    if (limit_avoid_enable_ && !ensure_limit_avoid_map_ready())
+    {
+      return;
+    }
+
+    const double stand_output_scale = compute_stand_output_scale();
+    last_stand_output_scale_ = stand_output_scale;
 
     const std::size_t usable_count = std::min(
         std::min(cmd_msg.effort.size(), latest_joint_positions_.size()),
@@ -338,15 +1256,202 @@ private:
 
     for (std::size_t i = 0; i < usable_count; ++i)
     {
-      const double position_error = stand_q_ref_active_[i] - latest_joint_positions_[i];
+      if (i >= stand_control_mask_.size() || stand_control_mask_[i] == 0U)
+      {
+        cmd_msg.effort[i] = 0.0;
+        continue;
+      }
+
+      double position_error = stand_q_ref_active_[i] - latest_joint_positions_[i];
+      if (stand_pos_error_abs_max_ > 0.0)
+      {
+        position_error = std::clamp(position_error, -stand_pos_error_abs_max_, stand_pos_error_abs_max_);
+      }
       const double damping_term = -latest_joint_velocities_[i];
-      double effort_cmd = (stand_kp_ * position_error) + (stand_kd_ * damping_term);
+      const double kp_eff = stand_kp_ * stand_kp_scale_per_joint_[i];
+      const double kd_eff = stand_kd_ * stand_kd_scale_per_joint_[i];
+      double effort_cmd = (kp_eff * position_error) + (kd_eff * damping_term);
+      effort_cmd += compute_limit_avoid_effort(i, latest_joint_positions_[i], latest_joint_velocities_[i]);
+      effort_cmd *= stand_output_scale;
       if (stand_effort_abs_max_ > 0.0)
       {
         effort_cmd = std::clamp(effort_cmd, -stand_effort_abs_max_, stand_effort_abs_max_);
       }
       cmd_msg.effort[i] = effort_cmd;
     }
+
+    apply_tilt_feedback(cmd_msg, usable_count);
+  }
+
+  /**
+   * @brief IMU 기울기에 따라 stand 출력 스케일을 계산한다.
+   *
+   * cut/recover 히스테리시스를 사용해 기울기 급증 구간에서 출력을 선제적으로 낮춘다.
+   * @return stand 출력 스케일(0~1)
+   */
+  double compute_stand_output_scale()
+  {
+    if (!stand_tilt_cut_enable_)
+    {
+      stand_tilt_cut_active_ = false;
+      return 1.0;
+    }
+    if (!imu_received_)
+    {
+      RCLCPP_WARN_THROTTLE(
+          this->get_logger(), *this->get_clock(), 3000,
+          "stand_tilt_cut enabled but /rb/imu is not ready yet");
+      return 1.0;
+    }
+
+    const double tilt_abs = std::max(std::abs(imu_roll_rad_), std::abs(imu_pitch_rad_));
+    if (!stand_tilt_cut_active_)
+    {
+      if (tilt_abs >= stand_tilt_cut_rad_)
+      {
+        stand_tilt_cut_active_ = true;
+        RCLCPP_WARN(
+            this->get_logger(),
+            "stand_tilt_cut active: tilt=%.3f rad (cut=%.3f, recover=%.3f, scale=%.2f)",
+            tilt_abs, stand_tilt_cut_rad_, stand_tilt_recover_rad_, stand_tilt_cut_output_scale_);
+      }
+    }
+    else
+    {
+      if (tilt_abs <= stand_tilt_recover_rad_)
+      {
+        stand_tilt_cut_active_ = false;
+        RCLCPP_INFO(
+            this->get_logger(),
+            "stand_tilt_cut cleared: tilt=%.3f rad", tilt_abs);
+      }
+    }
+    return stand_tilt_cut_active_ ? stand_tilt_cut_output_scale_ : 1.0;
+  }
+
+  /**
+   * @brief 조인트별 lower/upper limit 테이블을 joint_names 순서로 매핑한다.
+   * @return 매핑이 준비되면 true
+   */
+  bool ensure_limit_avoid_map_ready()
+  {
+    if (limit_avoid_map_ready_)
+    {
+      return true;
+    }
+    if (joint_names_.empty())
+    {
+      return false;
+    }
+
+    const std::size_t n = limit_avoid_joint_names_param_.size();
+    if (n == 0U || limit_avoid_lower_param_.size() != n || limit_avoid_upper_param_.size() != n)
+    {
+      if (!limit_avoid_invalid_warned_)
+      {
+        limit_avoid_invalid_warned_ = true;
+        RCLCPP_WARN(
+            this->get_logger(),
+            "limit_avoid table invalid: names=%zu lower=%zu upper=%zu",
+            limit_avoid_joint_names_param_.size(),
+            limit_avoid_lower_param_.size(),
+            limit_avoid_upper_param_.size());
+      }
+      return false;
+    }
+
+    limit_avoid_lower_per_joint_.assign(joint_names_.size(), 0.0);
+    limit_avoid_upper_per_joint_.assign(joint_names_.size(), 0.0);
+    limit_avoid_mask_.assign(joint_names_.size(), 0U);
+
+    std::size_t mapped = 0U;
+    for (std::size_t i = 0; i < n; ++i)
+    {
+      const auto it = std::find(joint_names_.begin(), joint_names_.end(), limit_avoid_joint_names_param_[i]);
+      if (it == joint_names_.end())
+      {
+        continue;
+      }
+      const std::size_t idx = static_cast<std::size_t>(std::distance(joint_names_.begin(), it));
+      const double lo = limit_avoid_lower_param_[i];
+      const double hi = limit_avoid_upper_param_[i];
+      if (hi <= lo)
+      {
+        continue;
+      }
+      limit_avoid_lower_per_joint_[idx] = lo;
+      limit_avoid_upper_per_joint_[idx] = hi;
+      limit_avoid_mask_[idx] = 1U;
+      ++mapped;
+    }
+
+    if (mapped == 0U)
+    {
+      if (!limit_avoid_invalid_warned_)
+      {
+        limit_avoid_invalid_warned_ = true;
+        RCLCPP_WARN(
+            this->get_logger(),
+            "limit_avoid table has no joint match with current joint_names");
+      }
+      return false;
+    }
+
+    limit_avoid_map_ready_ = true;
+    RCLCPP_INFO(
+        this->get_logger(),
+        "limit_avoid map ready: mapped=%zu/%zu margin=%.4f kp=%.3f kd=%.3f",
+        mapped, joint_names_.size(), limit_avoid_margin_rad_, limit_avoid_kp_, limit_avoid_kd_);
+    return true;
+  }
+
+  /**
+   * @brief lower/upper guard를 기준으로 한 soft-limit 회피 effort를 계산한다.
+   * @param idx 조인트 인덱스
+   * @param q 현재 조인트 각도
+   * @param dq 현재 조인트 속도
+   * @return limit 회피 보정 effort
+   */
+  double compute_limit_avoid_effort(std::size_t idx, double q, double dq)
+  {
+    if (!limit_avoid_enable_ || !limit_avoid_map_ready_)
+    {
+      return 0.0;
+    }
+    if (idx >= limit_avoid_mask_.size() || limit_avoid_mask_[idx] == 0U)
+    {
+      return 0.0;
+    }
+    if (idx >= limit_avoid_lower_per_joint_.size() || idx >= limit_avoid_upper_per_joint_.size())
+    {
+      return 0.0;
+    }
+
+    const double lo = limit_avoid_lower_per_joint_[idx];
+    const double hi = limit_avoid_upper_per_joint_[idx];
+    const double lo_guard = lo + limit_avoid_margin_rad_;
+    const double hi_guard = hi - limit_avoid_margin_rad_;
+    if (hi_guard <= lo_guard)
+    {
+      return 0.0;
+    }
+
+    double u = 0.0;
+    // lower guard 안쪽이면 +방향으로 밀고, 더 내려가는 속도를 감쇠한다.
+    if (q < lo_guard)
+    {
+      const double pos_err = lo_guard - q;
+      const double vel_err = std::max(0.0, -dq);
+      u += (limit_avoid_kp_ * pos_err) + (limit_avoid_kd_ * vel_err);
+    }
+    // upper guard 안쪽이면 -방향으로 밀고, 더 올라가는 속도를 감쇠한다.
+    if (q > hi_guard)
+    {
+      const double pos_err = q - hi_guard;
+      const double vel_err = std::max(0.0, dq);
+      u -= (limit_avoid_kp_ * pos_err) + (limit_avoid_kd_ * vel_err);
+    }
+    return u;
   }
 
   /**
@@ -409,6 +1514,317 @@ private:
     return false;
   }
 
+  /**
+   * @brief stand_pd 대상 조인트 마스크를 준비한다.
+   *
+   * stand_control_joints 파라미터가 비어 있으면 모든 조인트를 제어 대상으로 본다.
+   */
+  bool ensure_stand_control_mask_ready()
+  {
+    if (stand_control_mask_ready_)
+    {
+      return true;
+    }
+    if (joint_names_.empty())
+    {
+      return false;
+    }
+
+    stand_control_mask_.assign(joint_names_.size(), 0U);
+
+    if (stand_control_joints_param_.empty())
+    {
+      std::fill(stand_control_mask_.begin(), stand_control_mask_.end(), 1U);
+      stand_control_mask_ready_ = true;
+      return true;
+    }
+
+    std::unordered_set<std::string> requested(
+        stand_control_joints_param_.begin(), stand_control_joints_param_.end());
+    std::size_t matched_count = 0;
+    for (std::size_t i = 0; i < joint_names_.size(); ++i)
+    {
+      if (requested.find(joint_names_[i]) != requested.end())
+      {
+        stand_control_mask_[i] = 1U;
+        ++matched_count;
+        requested.erase(joint_names_[i]);
+      }
+    }
+
+    if (matched_count == 0U)
+    {
+      RCLCPP_WARN_THROTTLE(
+          this->get_logger(), *this->get_clock(), 3000,
+          "stand_control_joints has no match with current joint_names. stand_pd outputs stay zero.");
+      return false;
+    }
+
+    if (!requested.empty() && !stand_control_unknown_warned_)
+    {
+      stand_control_unknown_warned_ = true;
+      RCLCPP_WARN(
+          this->get_logger(),
+          "stand_control_joints contains %zu unknown names (ignored). matched=%zu/%zu",
+          requested.size(), matched_count, joint_names_.size());
+    }
+
+    stand_control_mask_ready_ = true;
+    RCLCPP_INFO(
+        this->get_logger(),
+        "stand_control_joints active: matched=%zu / total=%zu",
+        matched_count, joint_names_.size());
+    return true;
+  }
+
+  /**
+   * @brief 조인트 이름 기반으로 그룹별 PD 게인 스케일 맵을 준비한다.
+   *
+   * 분류 규칙:
+   * - hip: 이름에 "_hip_" 포함
+   * - knee: 이름에 "_knee_" 포함
+   * - ankle: 이름에 "_ankle_" 포함
+   * - torso: 이름이 "torso_joint"
+   * - 기타: 나머지
+   */
+  bool ensure_stand_gain_map_ready()
+  {
+    if (stand_gain_map_ready_)
+    {
+      return true;
+    }
+    if (joint_names_.empty())
+    {
+      return false;
+    }
+
+    stand_kp_scale_per_joint_.assign(joint_names_.size(), stand_kp_scale_other_);
+    stand_kd_scale_per_joint_.assign(joint_names_.size(), stand_kd_scale_other_);
+
+    std::size_t hip_count = 0;
+    std::size_t knee_count = 0;
+    std::size_t ankle_count = 0;
+    std::size_t torso_count = 0;
+    std::size_t other_count = 0;
+    for (std::size_t i = 0; i < joint_names_.size(); ++i)
+    {
+      const std::string &joint = joint_names_[i];
+      if (joint == "torso_joint")
+      {
+        stand_kp_scale_per_joint_[i] = stand_kp_scale_torso_;
+        stand_kd_scale_per_joint_[i] = stand_kd_scale_torso_;
+        ++torso_count;
+        continue;
+      }
+      if (joint.find("_hip_") != std::string::npos)
+      {
+        stand_kp_scale_per_joint_[i] = stand_kp_scale_hip_;
+        stand_kd_scale_per_joint_[i] = stand_kd_scale_hip_;
+        ++hip_count;
+        continue;
+      }
+      if (joint.find("_knee_") != std::string::npos)
+      {
+        stand_kp_scale_per_joint_[i] = stand_kp_scale_knee_;
+        stand_kd_scale_per_joint_[i] = stand_kd_scale_knee_;
+        ++knee_count;
+        continue;
+      }
+      if (joint.find("_ankle_") != std::string::npos)
+      {
+        stand_kp_scale_per_joint_[i] = stand_kp_scale_ankle_;
+        stand_kd_scale_per_joint_[i] = stand_kd_scale_ankle_;
+        ++ankle_count;
+        continue;
+      }
+      ++other_count;
+    }
+
+    stand_gain_map_ready_ = true;
+    RCLCPP_INFO(
+        this->get_logger(),
+        "stand gain map ready: hip=%zu knee=%zu ankle=%zu torso=%zu other=%zu kp_scales=%.2f/%.2f/%.2f/%.2f/%.2f kd_scales=%.2f/%.2f/%.2f/%.2f/%.2f",
+        hip_count, knee_count, ankle_count, torso_count, other_count,
+        stand_kp_scale_hip_, stand_kp_scale_knee_, stand_kp_scale_ankle_, stand_kp_scale_torso_, stand_kp_scale_other_,
+        stand_kd_scale_hip_, stand_kd_scale_knee_, stand_kd_scale_ankle_, stand_kd_scale_torso_, stand_kd_scale_other_);
+    return true;
+  }
+
+  /**
+   * @brief tilt 보정용 핵심 조인트 인덱스를 joint_names 기준으로 캐시한다.
+   * @return 하나 이상의 roll/pitch 축 제어 조인트를 찾으면 true
+   */
+  bool ensure_tilt_joint_index_ready()
+  {
+    if (tilt_joint_index_ready_)
+    {
+      return true;
+    }
+    if (joint_names_.empty())
+    {
+      return false;
+    }
+
+    const auto find_idx = [this](const std::string &name) -> int
+    {
+      const auto it = std::find(joint_names_.begin(), joint_names_.end(), name);
+      if (it == joint_names_.end())
+      {
+        return -1;
+      }
+      return static_cast<int>(std::distance(joint_names_.begin(), it));
+    };
+
+    idx_left_hip_roll_ = find_idx("left_hip_roll_joint");
+    idx_right_hip_roll_ = find_idx("right_hip_roll_joint");
+    idx_left_ankle_roll_ = find_idx("left_ankle_roll_joint");
+    idx_right_ankle_roll_ = find_idx("right_ankle_roll_joint");
+
+    idx_left_hip_pitch_ = find_idx("left_hip_pitch_joint");
+    idx_right_hip_pitch_ = find_idx("right_hip_pitch_joint");
+    idx_left_ankle_pitch_ = find_idx("left_ankle_pitch_joint");
+    idx_right_ankle_pitch_ = find_idx("right_ankle_pitch_joint");
+    idx_left_knee_ = find_idx("left_knee_joint");
+    idx_right_knee_ = find_idx("right_knee_joint");
+    idx_torso_ = find_idx("torso_joint");
+
+    const bool has_roll_pair = (idx_left_hip_roll_ >= 0) && (idx_right_hip_roll_ >= 0);
+    const bool has_pitch_pair =
+        ((idx_left_hip_pitch_ >= 0) && (idx_right_hip_pitch_ >= 0)) ||
+        ((idx_left_ankle_pitch_ >= 0) && (idx_right_ankle_pitch_ >= 0)) ||
+        ((idx_left_knee_ >= 0) && (idx_right_knee_ >= 0));
+    if (!has_roll_pair && !has_pitch_pair)
+    {
+      if (!tilt_joint_index_warned_)
+      {
+        tilt_joint_index_warned_ = true;
+        RCLCPP_WARN(
+            this->get_logger(),
+            "tilt feedback joint indices are not available in current joint_names");
+      }
+      return false;
+    }
+
+    tilt_joint_index_ready_ = true;
+    RCLCPP_INFO(
+        this->get_logger(),
+        "tilt feedback joint map ready: roll(hip %d/%d, ankle %d/%d, torso %d), pitch(hip %d/%d, ankle %d/%d, knee %d/%d, torso %d)",
+        idx_left_hip_roll_, idx_right_hip_roll_, idx_left_ankle_roll_, idx_right_ankle_roll_,
+        idx_torso_,
+        idx_left_hip_pitch_, idx_right_hip_pitch_, idx_left_ankle_pitch_, idx_right_ankle_pitch_,
+        idx_left_knee_, idx_right_knee_, idx_torso_);
+    return true;
+  }
+
+  /**
+   * @brief IMU roll/pitch를 이용해 stand effort에 미세 보정 항을 더한다.
+   *
+   * roll은 좌/우 hip_roll/ankle_roll에 반대 부호로 분배,
+   * pitch는 좌/우 hip_pitch/ankle_pitch에 같은 부호로 분배한다.
+   */
+  void apply_tilt_feedback(sensor_msgs::msg::JointState &cmd_msg, std::size_t usable_count)
+  {
+    if (!enable_tilt_feedback_)
+    {
+      return;
+    }
+    if (!imu_received_)
+    {
+      RCLCPP_WARN_THROTTLE(
+          this->get_logger(), *this->get_clock(), 3000,
+          "tilt feedback waiting for /rb/imu samples");
+      return;
+    }
+    if (!ensure_tilt_joint_index_ready())
+    {
+      return;
+    }
+
+    double roll = imu_roll_rad_;
+    double pitch = imu_pitch_rad_;
+    if (std::abs(roll) < tilt_deadband_rad_)
+    {
+      roll = 0.0;
+    }
+    if (std::abs(pitch) < tilt_deadband_rad_)
+    {
+      pitch = 0.0;
+    }
+
+    double u_roll = tilt_roll_sign_ * ((tilt_kp_roll_ * (-roll)) + (tilt_kd_roll_ * (-imu_roll_rate_rad_s_)));
+    const double u_pitch_p = tilt_pitch_sign_ * (tilt_kp_pitch_ * (-pitch));
+    const double u_pitch_d = tilt_pitch_sign_ * (tilt_kd_pitch_ * (-imu_pitch_rate_rad_s_));
+    double u_pitch = u_pitch_p + u_pitch_d;
+    const double u_pitch_raw = u_pitch;
+    if (tilt_effort_abs_max_ > 0.0)
+    {
+      u_roll = std::clamp(u_roll, -tilt_effort_abs_max_, tilt_effort_abs_max_);
+      u_pitch = std::clamp(u_pitch, -tilt_effort_abs_max_, tilt_effort_abs_max_);
+    }
+
+    const auto add_effort = [&](int idx, double delta)
+    {
+      if (idx < 0)
+      {
+        return;
+      }
+      const std::size_t i = static_cast<std::size_t>(idx);
+      if (i >= usable_count)
+      {
+        return;
+      }
+      if (i >= stand_control_mask_.size() || stand_control_mask_[i] == 0U)
+      {
+        return;
+      }
+      cmd_msg.effort[i] += delta;
+      if (stand_effort_abs_max_ > 0.0)
+      {
+        cmd_msg.effort[i] = std::clamp(cmd_msg.effort[i], -stand_effort_abs_max_, stand_effort_abs_max_);
+      }
+    };
+
+    const double roll_w_sum = tilt_weight_roll_hip_ + tilt_weight_roll_ankle_ + tilt_weight_roll_torso_;
+    const double pitch_w_sum =
+        tilt_weight_pitch_hip_ + tilt_weight_pitch_ankle_ + tilt_weight_pitch_knee_ + tilt_weight_pitch_torso_;
+    const double roll_norm = (roll_w_sum > 1e-9) ? (1.0 / roll_w_sum) : 0.0;
+    const double pitch_norm = (pitch_w_sum > 1e-9) ? (1.0 / pitch_w_sum) : 0.0;
+
+    const double roll_w_hip = tilt_weight_roll_hip_ * roll_norm;
+    const double roll_w_ankle = tilt_weight_roll_ankle_ * roll_norm;
+    const double roll_w_torso = tilt_weight_roll_torso_ * roll_norm;
+    const double pitch_w_hip = tilt_weight_pitch_hip_ * pitch_norm;
+    const double pitch_w_ankle = tilt_weight_pitch_ankle_ * pitch_norm;
+    const double pitch_w_knee = tilt_weight_pitch_knee_ * pitch_norm;
+    const double pitch_w_torso = tilt_weight_pitch_torso_ * pitch_norm;
+
+    // TILT 직전 원인 분석용 pitch 제어 항 스냅샷
+    last_tilt_dbg_pitch_input_rad_ = pitch;
+    last_tilt_dbg_pitch_rate_rad_s_ = imu_pitch_rate_rad_s_;
+    last_tilt_dbg_u_pitch_p_term_ = u_pitch_p;
+    last_tilt_dbg_u_pitch_d_term_ = u_pitch_d;
+    last_tilt_dbg_u_pitch_raw_ = u_pitch_raw;
+    last_tilt_dbg_u_pitch_clamped_ = u_pitch;
+    last_tilt_dbg_pitch_alloc_hip_ = u_pitch * pitch_w_hip;
+    last_tilt_dbg_pitch_alloc_ankle_ = u_pitch * pitch_w_ankle;
+    last_tilt_dbg_pitch_alloc_knee_ = u_pitch * pitch_w_knee;
+    last_tilt_dbg_pitch_alloc_torso_ = u_pitch * pitch_w_torso;
+
+    add_effort(idx_left_hip_roll_, +u_roll * roll_w_hip);
+    add_effort(idx_right_hip_roll_, -u_roll * roll_w_hip);
+    add_effort(idx_left_ankle_roll_, +u_roll * roll_w_ankle);
+    add_effort(idx_right_ankle_roll_, -u_roll * roll_w_ankle);
+    add_effort(idx_torso_, +u_roll * roll_w_torso);
+
+    add_effort(idx_left_hip_pitch_, +u_pitch * pitch_w_hip);
+    add_effort(idx_right_hip_pitch_, +u_pitch * pitch_w_hip);
+    add_effort(idx_left_ankle_pitch_, +u_pitch * pitch_w_ankle);
+    add_effort(idx_right_ankle_pitch_, +u_pitch * pitch_w_ankle);
+    add_effort(idx_left_knee_, +u_pitch * pitch_w_knee);
+    add_effort(idx_right_knee_, +u_pitch * pitch_w_knee);
+    add_effort(idx_torso_, +u_pitch * pitch_w_torso);
+  }
+
   // ===== 런타임 파라미터/설정값 =====
   double control_rate_hz_{200.0};
   double log_interval_sec_{5.0};
@@ -425,18 +1841,102 @@ private:
   double stand_kd_{2.0};
   double stand_effort_abs_max_{6.0};
   bool stand_hold_current_on_start_{true};
+  double stand_kp_scale_hip_{1.0};
+  double stand_kd_scale_hip_{1.0};
+  double stand_kp_scale_knee_{1.0};
+  double stand_kd_scale_knee_{1.0};
+  double stand_kp_scale_ankle_{1.0};
+  double stand_kd_scale_ankle_{1.0};
+  double stand_kp_scale_torso_{1.0};
+  double stand_kd_scale_torso_{1.0};
+  double stand_kp_scale_other_{1.0};
+  double stand_kd_scale_other_{1.0};
+  double stand_pos_error_abs_max_{0.35};
+  bool stand_tilt_cut_enable_{true};
+  double stand_tilt_cut_rad_{0.45};
+  double stand_tilt_recover_rad_{0.35};
+  double stand_tilt_cut_output_scale_{0.0};
+  std::size_t stand_debug_top_error_count_{3};
+  double last_stand_output_scale_{1.0};
   std::vector<double> stand_q_ref_param_;
+  std::vector<std::string> stand_control_joints_param_;
+  bool limit_avoid_enable_{false};
+  double limit_avoid_margin_rad_{0.05};
+  double limit_avoid_kp_{8.0};
+  double limit_avoid_kd_{1.0};
+  std::vector<std::string> limit_avoid_joint_names_param_;
+  std::vector<double> limit_avoid_lower_param_;
+  std::vector<double> limit_avoid_upper_param_;
+  std::string imu_topic_{"/rb/imu"};
+  bool enable_tilt_feedback_{true};
+  double tilt_kp_roll_{10.0};
+  double tilt_kd_roll_{2.0};
+  double tilt_kp_pitch_{12.0};
+  double tilt_kd_pitch_{2.5};
+  double tilt_deadband_rad_{0.03};
+  double tilt_effort_abs_max_{1.8};
+  double tilt_roll_sign_{1.0};
+  double tilt_pitch_sign_{1.0};
+  double tilt_weight_roll_hip_{0.7};
+  double tilt_weight_roll_ankle_{0.3};
+  double tilt_weight_roll_torso_{0.0};
+  double tilt_weight_pitch_hip_{0.6};
+  double tilt_weight_pitch_ankle_{0.3};
+  double tilt_weight_pitch_knee_{0.1};
+  double tilt_weight_pitch_torso_{0.0};
 
   // ===== 상태 캐시/통계 버퍼 =====
   std::vector<std::string> joint_names_;
   std::vector<double> latest_joint_positions_;
   std::vector<double> latest_joint_velocities_;
   std::vector<double> stand_q_ref_active_;
+  std::vector<double> stand_kp_scale_per_joint_;
+  std::vector<double> stand_kd_scale_per_joint_;
+  std::vector<std::uint8_t> stand_control_mask_;
+  std::vector<std::uint8_t> limit_avoid_mask_;
+  std::vector<double> limit_avoid_lower_per_joint_;
+  std::vector<double> limit_avoid_upper_per_joint_;
   std::vector<double> dt_samples_sec_;
 
   bool joint_state_received_{false};
   bool stand_reference_ready_{false};
   bool stand_ref_param_size_warned_{false};
+  bool stand_control_mask_ready_{false};
+  bool stand_gain_map_ready_{false};
+  bool stand_control_unknown_warned_{false};
+  bool stand_tilt_cut_active_{false};
+  bool limit_avoid_map_ready_{false};
+  bool limit_avoid_invalid_warned_{false};
+  bool imu_received_{false};
+  bool tilt_joint_index_ready_{false};
+  bool tilt_joint_index_warned_{false};
+
+  double imu_roll_rad_{0.0};
+  double imu_pitch_rad_{0.0};
+  double imu_roll_rate_rad_s_{0.0};
+  double imu_pitch_rate_rad_s_{0.0};
+  double last_tilt_dbg_pitch_input_rad_{std::numeric_limits<double>::quiet_NaN()};
+  double last_tilt_dbg_pitch_rate_rad_s_{std::numeric_limits<double>::quiet_NaN()};
+  double last_tilt_dbg_u_pitch_p_term_{std::numeric_limits<double>::quiet_NaN()};
+  double last_tilt_dbg_u_pitch_d_term_{std::numeric_limits<double>::quiet_NaN()};
+  double last_tilt_dbg_u_pitch_raw_{std::numeric_limits<double>::quiet_NaN()};
+  double last_tilt_dbg_u_pitch_clamped_{std::numeric_limits<double>::quiet_NaN()};
+  double last_tilt_dbg_pitch_alloc_hip_{std::numeric_limits<double>::quiet_NaN()};
+  double last_tilt_dbg_pitch_alloc_ankle_{std::numeric_limits<double>::quiet_NaN()};
+  double last_tilt_dbg_pitch_alloc_knee_{std::numeric_limits<double>::quiet_NaN()};
+  double last_tilt_dbg_pitch_alloc_torso_{std::numeric_limits<double>::quiet_NaN()};
+
+  int idx_left_hip_roll_{-1};
+  int idx_right_hip_roll_{-1};
+  int idx_left_ankle_roll_{-1};
+  int idx_right_ankle_roll_{-1};
+  int idx_left_hip_pitch_{-1};
+  int idx_right_hip_pitch_{-1};
+  int idx_left_ankle_pitch_{-1};
+  int idx_right_ankle_pitch_{-1};
+  int idx_left_knee_{-1};
+  int idx_right_knee_{-1};
+  int idx_torso_{-1};
 
   std::size_t miss_count_total_{0};
   std::size_t miss_count_window_{0};
@@ -450,7 +1950,9 @@ private:
   // ===== ROS2 통신 핸들 =====
   rclcpp::Publisher<sensor_msgs::msg::JointState>::SharedPtr command_pub_;
   rclcpp::Subscription<sensor_msgs::msg::JointState>::SharedPtr joint_state_sub_;
+  rclcpp::Subscription<sensor_msgs::msg::Imu>::SharedPtr imu_sub_;
   rclcpp::TimerBase::SharedPtr control_timer_;
+  OnSetParametersCallbackHandle::SharedPtr param_callback_handle_;
 };
 
 int main(int argc, char **argv)

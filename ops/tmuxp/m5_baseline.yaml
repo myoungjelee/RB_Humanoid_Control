@@ -1,0 +1,30 @@
+session_name: rb_m5_baseline
+start_directory: /home/leemou/Projects/RB_Humanoid_Control
+shell_command_before:
+  - export RUN_ID="${RUN_ID:?Set RUN_ID before tmuxp load}"
+  - export BASE="$HOME/Projects/RB_Humanoid_Control/logs/sim2real/$RUN_ID"
+  - mkdir -p "$BASE/m5"
+windows:
+  - window_name: m5_baseline
+    layout: main-vertical
+    panes:
+      - shell_command:
+          - cd /home/leemou/Projects/RB_Humanoid_Control
+          - python main.py --phase m5_stand 2>&1 | tee "$BASE/m5/isaac.log"
+      - shell_command:
+          - cd /home/leemou/Projects/RB_Humanoid_Control/ros2_ws
+          - source /opt/ros/humble/setup.bash
+          - source install/setup.bash
+          - echo "[WAIT] sleeping 15s for Isaac startup"
+          - sleep 15
+          - until timeout 1 ros2 topic echo --once /clock >/dev/null 2>&1; do echo "[WAIT] /clock not ready yet"; sleep 1; done
+          - timeout 60 ros2 launch rb_controller controller.launch.py params_file:=/home/leemou/Projects/RB_Humanoid_Control/ros2_ws/src/rb_controller/config/scenarios/baseline_zero.yaml 2>&1 | tee "$BASE/m5/m5_baseline.log"
+          - exec bash
+      - shell_command:
+          - echo "[WAIT] sleeping 80s before log summary"
+          - sleep 80
+          - rg "rb_controller started" "$BASE/m5/m5_baseline.log" | head -n 1 | tee "$BASE/m5/start.txt"
+          - 'rg "safety active: reason=" "$BASE/m5/m5_baseline.log" | sed -E ''s/.*reason=([A-Z_]+).*/\\1/'' | sort | uniq -c | tee "$BASE/m5/reason_count.txt"'
+          - rg "loop_stats" "$BASE/m5/m5_baseline.log" | tail -n 8 | tee "$BASE/m5/loop_tail.txt"
+          - echo "[CAPTURE] signal_mode=zero + reason_count + loop_tail"
+          - exec bash

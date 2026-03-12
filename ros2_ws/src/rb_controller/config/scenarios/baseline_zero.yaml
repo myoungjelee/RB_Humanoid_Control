@@ -1,0 +1,20 @@
+rb_controller:
+  ros__parameters:
+    signal_mode: zero
+    enable_tilt_feedback: false
+    stand_hold_current_on_start: false
+    stand_q_ref: [0.0]
+
+rb_safety:
+  ros__parameters:
+    input_command_topic: /rb/command_raw
+    output_command_topic: /rb/command_safe
+    input_joint_states_topic: /rb/joint_states
+    safety_enabled: true
+    safe_mode_action: zero_effort
+    effort_abs_max_default: 8.0
+    joint_limit_margin_rad: 0.0
+    input_timeout_sec: 1.0
+    tilt_limit_roll_rad: 1.0
+    tilt_limit_pitch_rad: 1.0
+    imu_topic: /rb/imu

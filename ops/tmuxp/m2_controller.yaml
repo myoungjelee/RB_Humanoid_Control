@@ -1,0 +1,43 @@
+session_name: rb_m2_controller
+start_directory: /home/leemou/Projects/RB_Humanoid_Control
+shell_command_before:
+  - export RUN_ID="${RUN_ID:?Set RUN_ID before tmuxp load}"
+  - export BASE="$HOME/Projects/RB_Humanoid_Control/logs/sim2real/$RUN_ID"
+  - mkdir -p "$BASE/m2"
+windows:
+  - window_name: m2_controller
+    layout: main-vertical
+    panes:
+      - shell_command:
+          - cd /home/leemou/Projects/RB_Humanoid_Control
+          - python main.py --phase m1_sensor 2>&1 | tee "$BASE/m2/isaac.log"
+      - shell_command:
+          - cd /home/leemou/Projects/RB_Humanoid_Control/ros2_ws
+          - source /opt/ros/humble/setup.bash
+          - source install/setup.bash
+          - echo "[WAIT] sleeping 15s for Isaac startup"
+          - sleep 15
+          - until timeout 1 ros2 topic echo --once /clock >/dev/null 2>&1; do echo "[WAIT] /clock not ready yet"; sleep 1; done
+          - ros2 run rb_controller rb_controller_node --ros-args -p use_sim_time:=true -p signal_mode:=zero -p enable_tilt_feedback:=false 2>&1 | tee "$BASE/m2/controller.log"
+      - shell_command:
+          - cd /home/leemou/Projects/RB_Humanoid_Control/ros2_ws
+          - source /opt/ros/humble/setup.bash
+          - source install/setup.bash
+          - echo "[WAIT] sleeping 15s for Isaac startup"
+          - sleep 15
+          - until timeout 1 ros2 topic echo --once /clock >/dev/null 2>&1; do echo "[WAIT] /clock not ready yet"; sleep 1; done
+          - until timeout 1 ros2 topic echo --once /rb/command_raw >/dev/null 2>&1; do echo "[WAIT] /rb/command_raw not ready yet"; sleep 1; done
+          - timeout 12 ros2 topic hz /rb/command_raw | tee "$BASE/m2/command_raw_hz.txt"
+          - rg "loop_stats" "$BASE/m2/controller.log" | tail -n 5 | tee "$BASE/m2/loop_tail.txt"
+          - |
+            {
+              echo "[controller]"
+              rg "rb_controller started|loop_stats" "$BASE/m2/controller.log" \
+              | tail -n 6 \
+              | sed -E 's/ tilt_r=.*//'
+              echo
+              echo "[command_raw hz]"
+              tail -n 5 "$BASE/m2/command_raw_hz.txt"
+            } | tee "$BASE/m2/capture_summary.txt"
+          - echo "[CAPTURE] use capture_summary.txt pane for M2 screenshot"
+          - exec bash

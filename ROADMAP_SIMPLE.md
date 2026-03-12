@@ -1,118 +1,52 @@
-# RB_Humanoid_Control -- 단계별 한줄 정리
+# ROADMAP SIMPLE
 
----
+## 목표
+- 로보티즈 휴머노이드 제어 엔지니어 지원용 메인 포트폴리오 완성
+- 실기체 없이도 Isaac Sim + ROS2 기반으로 휴머노이드 제어 구조를 직접 구현/검증
 
-## 일정 스냅샷 (기준일: 2026-03-10)
+## 큰 원칙
+- Gym/IsaacLab Stage1은 baseline/archive로 유지
+- 메인 트랙은 standalone `World.step()` + ROS2
+- 모델은 G1 유지
+- `saved USD`는 메인 경로가 아니라 debug/reference artifact로만 사용
+- 메인 source of truth는 original G1 direct spawn standalone
 
-- 원래 목표: **Stretch 2026-03-19**, 최종 마감: **2026-03-26**
-- 현재 완료: **M0, M1, M2, M3, M4**
-- 현재 진행: **M5**
-- 현재 페이스: **계획 대비 약간 빠름**
+## 마일스톤
+- M0: 인터페이스/조인트 ordering/frame/command 고정
+- M1: 센서 파이프라인 검증
+- M2: controller loop / dt-jitter 검증
+- M3: command apply 검증
+- M4: safety 검증
+- M5: stand stabilization
+- M6: KPI / summary 자동화
+- M7+: 문서/영상/포트폴리오 마무리
 
-### 마일스톤 일정(요약)
+## M5 정의
+### baseline
+- `baseline_zero`
+- disturbance를 가했을 때 controller OFF 상태의 반응 확인
 
-- 2026-03-15: M5 완료 목표 (stand 안정화)
-- 2026-03-19: M6 완료 목표 (재지원 게이트, Stretch)
-- 2026-03-26: 최종 데드라인
+### stand
+- `stand_pd_default`
+- 같은 disturbance에서 controller ON 상태의 반응 확인
 
----
+### 핵심 메시지
+- controller OFF -> 외란에 더 취약
+- controller ON  -> 같은 외란에서 더 안정
 
-## M0
+## 현재 전략
+- G1 유지
+- Atlas 보류
+- disturbance A/B 추가
+- KPI summary 추가
+- state_estimator는 M5 이후 MVP로만 검토
 
-### 인터페이스/주기 기준 고정
+## 현재 단계
+- M1~M4 standalone 재검증 완료
+- direct spawn standalone 전환 작업 진행 중
+- 이후 M5 disturbance 비교로 넘어갈 예정
 
-- command mode(topic/frame/joint order) 고정
-- control rate(200Hz) / sim dt(0.005) 고정
-
----
-
-## M1
-
-### 센서가 잘 들어오는지 확인
-
-- /clock
-- /rb/joint_states
-- /rb/imu -> 데이터 흐름 검증 단계
-
----
-
-## M2
-
-### 제어 루프가 잘 도는지 확인
-
-- C++ controller 200Hz timer
-- dt_mean / dt_p95 / miss_count -> 타이밍 안정성 증명
-
----
-
-## M3
-
-### 제어 출력이 모터(시뮬)에 전달되는지 확인
-
-- /rb/command_raw -> Isaac articulation 연결
-- joint_states 변화 확인 -> 입력 -> 물리 -> 출력 루프 검증
-
----
-
-## M4
-
-### 문제 생기면 안전하게 멈추는지 확인
-
-- torque clamp
-- timeout watchdog
-- joint limit
-- tilt limit -> 안전 레이어 검증
-
----
-
-## M5
-
-### 정책 없이도 서 있는지 확인
-
-- stand pose 유지 제어(PD/impedance)
-- 20~30초 안정 유지 + safety 연동
-- KPI 수치 확보 -> 제어 기반 완성 단계
-
----
-
-## M6
-
-### KPI/리포트 자동화
-
-- raw/summary 자동 생성
-- overview/one-pager 갱신
-- loop dt/jitter 통계 리포트 포함
-
----
-
-## M7
-
-### 상태추정 v1 적용
-
-- IMU 기반 roll/pitch 안정 추정
-- estimator 출력을 controller 입력으로 연결
-
----
-
-## M8 (선택 강화)
-
-### RT-Ready 패키지
-
-- executor/스레딩 정책 비교
-- 우선순위/지연 계측(cyclictest 등)
-
----
-
-## M9 (선택 강화)
-
-### Real backend 어댑터
-
-- ros2_control/hardware_interface 연결
-- Sim/Real 백엔드 교체 가능 구조 검증
-
----
-
-## 핵심 철학
-
-제어는 정책과 독립적으로 안정적이어야 한다.
-정책은 성능을 높이는 계층이고, 안전과 균형은 제어 루프가 책임진다.
+## 지원 일정
+- 공격적 목표: 3/18
+- 현실적 목표: 3/19
+- 안전 마감: 3/21

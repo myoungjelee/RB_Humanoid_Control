@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "rclcpp/rclcpp.hpp"
+#include "rcl_interfaces/msg/set_parameters_result.hpp"
 #include "sensor_msgs/msg/imu.hpp"
 #include "sensor_msgs/msg/joint_state.hpp"
 
@@ -38,6 +39,9 @@ public:
     input_timeout_sec_ = this->declare_parameter<double>("input_timeout_sec", 0.15);
     tilt_limit_roll_rad_ = this->declare_parameter<double>("tilt_limit_roll_rad", 0.35);
     tilt_limit_pitch_rad_ = this->declare_parameter<double>("tilt_limit_pitch_rad", 0.35);
+    joint_limit_debug_log_ = this->declare_parameter<bool>("joint_limit_debug_log", true);
+    // TILT 원인 분석용 상세 로그 on/off
+    tilt_debug_log_ = this->declare_parameter<bool>("tilt_debug_log", true);
 
     if (effort_abs_max_default_ < 0.0)
     {
@@ -75,6 +79,10 @@ public:
     // safety.yaml의 joint_limits.* 파라미터를 로딩한다.
     load_joint_limits_from_overrides();
 
+    // 런타임 ros2 param set 요청을 안전하게 반영한다.
+    param_callback_handle_ = this->add_on_set_parameters_callback(
+        std::bind(&RbSafetyNode::on_parameters_changed, this, std::placeholders::_1));
+
     RCLCPP_INFO(
         this->get_logger(),
         "rb_safety started: in=%s out=%s js=%s imu=%s safety=%s limits=%zu",
@@ -100,6 +108,154 @@ private:
     bool has_lower{false};
     bool has_upper{false};
   };
+
+  // JOINT_LIMIT 원인 파악용 최근 히트 1건 디버그 정보
+  struct JointLimitDebugInfo
+  {
+    bool valid{false};
+    std::string joint_name{};
+    std::string trigger{};
+    double position{0.0};
+    double effort_before{0.0};
+    double soft_lower{0.0};
+    double soft_upper{0.0};
+    double hard_lower{0.0};
+    double hard_upper{0.0};
+  };
+
+  /**
+   * @brief ros2 param set 요청을 검증하고 런타임 변수에 즉시 반영한다.
+   * @param params 변경 요청된 파라미터 목록
+   * @return 적용 성공/실패 결과
+   */
+  rcl_interfaces::msg::SetParametersResult on_parameters_changed(
+      const std::vector<rclcpp::Parameter> &params)
+  {
+    rcl_interfaces::msg::SetParametersResult result;
+    result.successful = true;
+    result.reason = "ok";
+
+    for (const auto &param : params)
+    {
+      const std::string &name = param.get_name();
+
+      if (name == "input_command_topic" || name == "output_command_topic" ||
+          name == "input_joint_states_topic" || name == "imu_topic")
+      {
+        result.successful = false;
+        result.reason = "runtime update not supported for topic parameters (restart required)";
+        return result;
+      }
+      if (name.rfind("joint_limits.", 0) == 0)
+      {
+        result.successful = false;
+        result.reason = "runtime update not supported for joint_limits.* (restart required)";
+        return result;
+      }
+
+      if (name == "safety_enabled")
+      {
+        safety_enabled_ = param.as_bool();
+        continue;
+      }
+      if (name == "safe_mode_action")
+      {
+        const std::string action = param.as_string();
+        if (action != "zero_effort")
+        {
+          result.successful = false;
+          result.reason = "safe_mode_action currently supports only zero_effort";
+          return result;
+        }
+        safe_mode_action_ = action;
+        continue;
+      }
+      if (name == "effort_abs_max_default")
+      {
+        const double v = param.as_double();
+        if (v < 0.0)
+        {
+          result.successful = false;
+          result.reason = "effort_abs_max_default must be >= 0";
+          return result;
+        }
+        effort_abs_max_default_ = v;
+        continue;
+      }
+      if (name == "joint_limit_margin_rad")
+      {
+        const double v = param.as_double();
+        if (v < 0.0)
+        {
+          result.successful = false;
+          result.reason = "joint_limit_margin_rad must be >= 0";
+          return result;
+        }
+        joint_limit_margin_rad_ = v;
+        continue;
+      }
+      if (name == "input_timeout_sec")
+      {
+        const double v = param.as_double();
+        if (v < 0.0)
+        {
+          result.successful = false;
+          result.reason = "input_timeout_sec must be >= 0";
+          return result;
+        }
+        input_timeout_sec_ = v;
+        continue;
+      }
+      if (name == "tilt_limit_roll_rad")
+      {
+        const double v = param.as_double();
+        if (v < 0.0)
+        {
+          result.successful = false;
+          result.reason = "tilt_limit_roll_rad must be >= 0";
+          return result;
+        }
+        tilt_limit_roll_rad_ = v;
+        continue;
+      }
+      if (name == "tilt_limit_pitch_rad")
+      {
+        const double v = param.as_double();
+        if (v < 0.0)
+        {
+          result.successful = false;
+          result.reason = "tilt_limit_pitch_rad must be >= 0";
+          return result;
+        }
+        tilt_limit_pitch_rad_ = v;
+        continue;
+      }
+      if (name == "joint_limit_debug_log")
+      {
+        joint_limit_debug_log_ = param.as_bool();
+        continue;
+      }
+      if (name == "tilt_debug_log")
+      {
+        tilt_debug_log_ = param.as_bool();
+        continue;
+      }
+    }
+
+    RCLCPP_INFO(
+        this->get_logger(),
+        "runtime safety parameters updated: safety=%s safe_mode=%s effort_max=%.3f margin=%.4f timeout=%.3f tilt_limit=[%.3f,%.3f] debug(joint/tilt)=%s/%s",
+        safety_enabled_ ? "on" : "off",
+        safe_mode_action_.c_str(),
+        effort_abs_max_default_,
+        joint_limit_margin_rad_,
+        input_timeout_sec_,
+        tilt_limit_roll_rad_,
+        tilt_limit_pitch_rad_,
+        joint_limit_debug_log_ ? "on" : "off",
+        tilt_debug_log_ ? "on" : "off");
+    return result;
+  }
 
   /**
    * @brief /rb/command_raw 수신 콜백: 안전 필터를 적용해 /rb/command_safe로 전달한다.
@@ -246,6 +402,7 @@ private:
       return false;
     }
 
+    joint_limit_debug_info_.valid = false;
     std::size_t hit_count = 0;
     for (std::size_t i = 0; i < cmd_msg.name.size(); ++i)
     {
@@ -274,27 +431,53 @@ private:
 
       const double position = pos_it->second;
       double & effort_cmd = cmd_msg.effort[i];
+      const double effort_before = effort_cmd;
       bool limited = false;
+      std::string trigger = "";
 
       if (position <= soft_lower && effort_cmd < 0.0)
       {
         effort_cmd = 0.0;
         limited = true;
+        if (trigger.empty())
+        {
+          trigger = "SOFT_LOWER_OUTWARD";
+        }
       }
       if (position >= soft_upper && effort_cmd > 0.0)
       {
         effort_cmd = 0.0;
         limited = true;
+        if (trigger.empty())
+        {
+          trigger = "SOFT_UPPER_OUTWARD";
+        }
       }
       if ((position < lower || position > upper) && effort_cmd != 0.0)
       {
         effort_cmd = 0.0;
         limited = true;
+        if (trigger.empty())
+        {
+          trigger = "HARD_LIMIT";
+        }
       }
 
       if (limited)
       {
         ++hit_count;
+        if (!joint_limit_debug_info_.valid)
+        {
+          joint_limit_debug_info_.valid = true;
+          joint_limit_debug_info_.joint_name = cmd_msg.name[i];
+          joint_limit_debug_info_.trigger = trigger;
+          joint_limit_debug_info_.position = position;
+          joint_limit_debug_info_.effort_before = effort_before;
+          joint_limit_debug_info_.soft_lower = soft_lower;
+          joint_limit_debug_info_.soft_upper = soft_upper;
+          joint_limit_debug_info_.hard_lower = lower;
+          joint_limit_debug_info_.hard_upper = upper;
+        }
       }
     }
 
@@ -364,9 +547,11 @@ private:
           "unknown safe_mode_action '%s'. fallback=zero_effort", safe_mode_action_.c_str());
     }
 
+    // effort-only 명령 경로를 유지하기 위해 safe action도 effort만 0으로 만든다.
+    // position/velocity는 비워 articulation에 추가 제약을 넣지 않는다.
     std::fill(cmd_msg.effort.begin(), cmd_msg.effort.end(), 0.0);
-    std::fill(cmd_msg.velocity.begin(), cmd_msg.velocity.end(), 0.0);
-    std::fill(cmd_msg.position.begin(), cmd_msg.position.end(), 0.0);
+    cmd_msg.velocity.clear();
+    cmd_msg.position.clear();
   }
 
   /**
@@ -398,9 +583,51 @@ private:
     }
     else
     {
-      RCLCPP_WARN(
-          this->get_logger(),
-          "safety active: reason=%s", safety_reason_to_string(reason));
+      if (reason == SafetyReason::JOINT_LIMIT && joint_limit_debug_log_ && joint_limit_debug_info_.valid)
+      {
+        RCLCPP_WARN(
+            this->get_logger(),
+            "safety active: reason=JOINT_LIMIT joint=%s trigger=%s pos=%.4f effort_before=%.4f soft=[%.4f,%.4f] hard=[%.4f,%.4f]",
+            joint_limit_debug_info_.joint_name.c_str(),
+            joint_limit_debug_info_.trigger.c_str(),
+            joint_limit_debug_info_.position,
+            joint_limit_debug_info_.effort_before,
+            joint_limit_debug_info_.soft_lower,
+            joint_limit_debug_info_.soft_upper,
+            joint_limit_debug_info_.hard_lower,
+            joint_limit_debug_info_.hard_upper);
+      }
+      else if (reason == SafetyReason::TILT && tilt_debug_log_)
+      {
+        // TILT는 관절명이 바로 나오지 않으므로 축별 초과 정보를 함께 남긴다.
+        const double abs_roll = std::abs(latest_roll_rad_);
+        const double abs_pitch = std::abs(latest_pitch_rad_);
+        const bool roll_exceeded = (tilt_limit_roll_rad_ > 0.0) && (abs_roll > tilt_limit_roll_rad_);
+        const bool pitch_exceeded = (tilt_limit_pitch_rad_ > 0.0) && (abs_pitch > tilt_limit_pitch_rad_);
+        const char * axis =
+            (roll_exceeded && pitch_exceeded) ? "ROLL+PITCH" :
+            (roll_exceeded ? "ROLL" : (pitch_exceeded ? "PITCH" : "UNKNOWN"));
+        const double imu_age_sec = latest_imu_received_
+            ? std::chrono::duration<double>(std::chrono::steady_clock::now() - latest_imu_time_steady_).count()
+            : -1.0;
+        RCLCPP_WARN(
+            this->get_logger(),
+            "safety active: reason=TILT axis=%s roll=%.3f pitch=%.3f abs=[%.3f,%.3f] limit=[%.3f,%.3f] imu_age=%.3fs",
+            axis,
+            latest_roll_rad_,
+            latest_pitch_rad_,
+            abs_roll,
+            abs_pitch,
+            tilt_limit_roll_rad_,
+            tilt_limit_pitch_rad_,
+            imu_age_sec);
+      }
+      else
+      {
+        RCLCPP_WARN(
+            this->get_logger(),
+            "safety active: reason=%s", safety_reason_to_string(reason));
+      }
     }
     last_safety_reason_ = reason;
   }
@@ -532,9 +759,12 @@ private:
   double input_timeout_sec_{0.15};
   double tilt_limit_roll_rad_{0.35};
   double tilt_limit_pitch_rad_{0.35};
+  bool joint_limit_debug_log_{true};
+  bool tilt_debug_log_{true};
 
   std::unordered_map<std::string, double> latest_joint_positions_;
   std::unordered_map<std::string, JointLimitBound> joint_limits_;
+  JointLimitDebugInfo joint_limit_debug_info_;
 
   std::size_t clamp_hit_total_{0};
   std::size_t clamp_hit_window_{0};
@@ -559,6 +789,7 @@ private:
   rclcpp::Subscription<sensor_msgs::msg::JointState>::SharedPtr command_sub_;
   rclcpp::Subscription<sensor_msgs::msg::JointState>::SharedPtr joint_state_sub_;
   rclcpp::Subscription<sensor_msgs::msg::Imu>::SharedPtr imu_sub_;
+  OnSetParametersCallbackHandle::SharedPtr param_callback_handle_;
 };
 
 int main(int argc, char **argv)

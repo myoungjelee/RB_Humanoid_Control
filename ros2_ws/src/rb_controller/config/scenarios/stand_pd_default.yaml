@@ -1,0 +1,33 @@
+rb_controller:
+  ros__parameters:
+    signal_mode: stand_pd
+    stand_kp: 6.0
+    stand_kd: 8.0
+    stand_effort_abs_max: 1.4
+    stand_hold_current_on_start: true
+    stand_q_ref: [0.0]
+    stand_pos_error_abs_max: 0.18
+    stand_tilt_cut_enable: true
+    stand_tilt_cut_rad: 0.40
+    stand_tilt_recover_rad: 0.30
+    stand_tilt_cut_output_scale: 0.30
+    enable_tilt_feedback: true
+    tilt_kp_roll: 10.0
+    tilt_kd_roll: 2.0
+    tilt_kp_pitch: 12.0
+    tilt_kd_pitch: 2.5
+    tilt_effort_abs_max: 1.8
+
+rb_safety:
+  ros__parameters:
+    input_command_topic: /rb/command_raw
+    output_command_topic: /rb/command_safe
+    input_joint_states_topic: /rb/joint_states
+    safety_enabled: true
+    safe_mode_action: zero_effort
+    effort_abs_max_default: 8.0
+    joint_limit_margin_rad: 0.0
+    input_timeout_sec: 1.0
+    tilt_limit_roll_rad: 1.0
+    tilt_limit_pitch_rad: 1.0
+    imu_topic: /rb/imu

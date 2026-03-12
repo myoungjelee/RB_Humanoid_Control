@@ -79,6 +79,7 @@ AGENTS.md
 MASTER_PLAN.md
 STATUS.md
 ROS2_SIM2REAL_STARTER_GUIDE.md
+VIDEO_CAPTURE_GUIDE.md
 
 # Stage1 experiment artifacts policy:
 # - keep raw logs untracked

@@ -43,7 +43,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--phase", type=str, default=None, help="phase override")
 
     # M1 override options
-    parser.add_argument("--task", choices=["flat", "rough"], default=None)
+    parser.add_argument("--task", choices=["flat", "rough", "stand"], default=None)
     parser.add_argument("--num_envs", type=int, default=None)
     parser.add_argument("--steps", type=int, default=None)
     parser.add_argument("--disable_fabric", action=argparse.BooleanOptionalAction, default=None)

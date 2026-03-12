@@ -4,7 +4,7 @@
 - M1(sensor publish 확인)
 - M3(command apply 확인)
 - M5(stand: /rb/command_safe 적용 확인)
-학습/분석 우선: 자동 로그/자동 캡처는 포함하지 않는다.
+메인 ROS2 트랙은 standalone `World.step()` backend를 사용한다.
 """
 
 from __future__ import annotations
@@ -12,10 +12,8 @@ from __future__ import annotations
 import time
 from typing import Any
 
-from rb_utils.termination_utils import as_any_bool
-
 from .graph_builder import build_m1_sensor_graph, build_m3_command_graph
-from .world import create_env
+from .world import create_standalone_world
 
 
 def prepare_phase_runtime(args_cli: Any, phase_cfg: dict[str, Any]) -> None:
@@ -38,13 +36,11 @@ def _run_rollout_phase(
     """공통 rollout phase 실행기.
 
     공통 흐름:
-    1) env reset
+    1) standalone direct spawn scene 구성
     2) OmniGraph 구성
-    3) rollout step 진행
+    3) `World.step()` 진행
     """
-    import torch
-
-    task_id, env, robot_usd_path = create_env(args_cli, phase_cfg)
+    task_id, world, asset_source = create_standalone_world(args_cli, phase_cfg)
 
     status = "failed_before_run"
     executed_steps = 0
@@ -53,8 +49,8 @@ def _run_rollout_phase(
     graph_note = "not_attempted"
 
     try:
-        if robot_usd_path:
-            print(f"[ASSET] robot_usd_path={robot_usd_path}", flush=True)
+        if asset_source:
+            print(f"[ASSET] asset_source={asset_source}", flush=True)
 
         # SpotATS 패턴: 타임라인 재생을 명시적으로 켠다.
         try:
@@ -67,17 +63,9 @@ def _run_rollout_phase(
         except Exception as exc:
             print(f"[TIMELINE] warning: failed to control timeline: {type(exc).__name__}: {exc}", flush=True)
 
-        _, _ = env.reset()
-        graph_built, graph_note = graph_builder(env=env, phase_cfg=phase_cfg)
+        graph_built, graph_note = graph_builder(env=world, phase_cfg=phase_cfg)
         print(f"[GRAPH] built={graph_built} note={graph_note}", flush=True)
 
-        unwrapped = getattr(env, "unwrapped", None)
-        device = getattr(unwrapped, "device", "cpu")
-        action_shape = env.action_space.shape
-        if not isinstance(action_shape, tuple):
-            raise RuntimeError("Invalid env.action_space.shape")
-
-        actions = torch.zeros(action_shape, device=device)
         t0 = time.time()
         target_steps = int(phase_cfg.get("steps", -1))
         infinite_steps = target_steps <= 0
@@ -90,17 +78,9 @@ def _run_rollout_phase(
             flush=True,
         )
         last_progress_log_sec = t0
-        sim = getattr(env.unwrapped, "sim", None)
 
         while simulation_app.is_running() and (infinite_steps or executed_steps < target_steps):
-            with torch.no_grad():
-                _, _, terminated, truncated, _ = env.step(actions)
-
-            # SpotATS의 world.step(render=True)와 같은 효과를 주기 위해 렌더를 강제한다.
-            # OnTick/OnPlaybackTick 기반 ROS2 graph가 헤드리스에서도 tick되도록 보조한다.
-            if sim is not None and hasattr(sim, "render"):
-                sim.render()
-
+            world.step(render=True)
             executed_steps += 1
             now_sec = time.time()
             if progress_log_interval_sec > 0.0 and (now_sec - last_progress_log_sec) >= progress_log_interval_sec:
@@ -110,24 +90,17 @@ def _run_rollout_phase(
                 )
                 last_progress_log_sec = now_sec
 
-            done = as_any_bool(terminated) or as_any_bool(truncated)
-            if done and bool(phase_cfg.get("reset_on_done", True)):
-                _, _ = env.reset()
-                actions = torch.zeros(action_shape, device=device)
-            elif done:
-                print(f"[DONE] episode ended at step={executed_steps}", flush=True)
-                break
-
         elapsed_sec = time.time() - t0
         if infinite_steps:
             status = "stopped_no_step_limit"
         else:
             status = "completed_target_steps" if executed_steps >= target_steps else "stopped_early"
     finally:
-        env.close()
+        world.close()
 
     return {
         "task_id": task_id,
+        "backend": "standalone_world",
         "status": status,
         "executed_steps": executed_steps,
         "elapsed_sec": elapsed_sec,

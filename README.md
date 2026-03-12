@@ -33,10 +33,10 @@ Isaac Sim (ROS2 Bridge)
 ## Evidence
 - Sim2Real overview: `reports/sim2real/overview.md`
 - Sim2Real one-pager: `reports/sim2real/ONE_PAGER.md`
-- M1 proof image: `reports/sim2real/images/m1.png`
-- M2 proof image: `reports/sim2real/images/m2_controller.png`
-- M3 proof image: `reports/sim2real/images/m3_command.png`
-- M4 proof image: `reports/sim2real/images/m4_safety.png`
+- M1 proof image: `reports/sim2real/images/legacy_backend/m1.png`
+- M2 proof image: `reports/sim2real/images/legacy_backend/m2_controller.png`
+- M3 proof image: `reports/sim2real/images/legacy_backend/m3_command.png`
+- M4 proof image: `reports/sim2real/images/legacy_backend/m4_safety.png`
 - Saved stage USD (로컬 전용, git 미추적): `sim/isaac_scenes/g1_stage.usd`
 - Stage1 overview: `reports/stage1/overview.md`
 - Stage1 one-pager: `reports/stage1/ONE_PAGER.md`
@@ -44,16 +44,16 @@ Isaac Sim (ROS2 Bridge)
 - Master plan (SSOT): `MASTER_PLAN.md`
 
 ## M1 Snapshot
-![M1 Topic Proof](reports/sim2real/images/m1.png)
+![M1 Topic Proof](reports/sim2real/images/legacy_backend/m1.png)
 
 ## M2 Snapshot
-![M2 Controller Proof](reports/sim2real/images/m2_controller.png)
+![M2 Controller Proof](reports/sim2real/images/legacy_backend/m2_controller.png)
 
 ## M3 Snapshot
-![M3 Command Apply Proof](reports/sim2real/images/m3_command.png)
+![M3 Command Apply Proof](reports/sim2real/images/legacy_backend/m3_command.png)
 
 ## M4 Snapshot
-![M4 Safety Proof](reports/sim2real/images/m4_safety.png)
+![M4 Safety Proof](reports/sim2real/images/legacy_backend/m4_safety.png)
 
 ## Current Progress (2026-03-09)
 - M0 Decision Lock: complete

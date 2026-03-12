@@ -1,0 +1,36 @@
+session_name: rb_m3_command
+start_directory: /home/leemou/Projects/RB_Humanoid_Control
+shell_command_before:
+  - export RUN_ID="${RUN_ID:?Set RUN_ID before tmuxp load}"
+  - export BASE="$HOME/Projects/RB_Humanoid_Control/logs/sim2real/$RUN_ID"
+  - mkdir -p "$BASE/m3"
+windows:
+  - window_name: m3_command
+    layout: main-vertical
+    panes:
+      - shell_command:
+          - cd /home/leemou/Projects/RB_Humanoid_Control
+          - python main.py --phase m3_command 2>&1 | tee "$BASE/m3/isaac.log"
+      - shell_command:
+          - cd /home/leemou/Projects/RB_Humanoid_Control/ros2_ws
+          - source /opt/ros/humble/setup.bash
+          - source install/setup.bash
+          - echo "[WAIT] sleeping 15s for Isaac startup"
+          - sleep 15
+          - until timeout 1 ros2 topic echo --once /clock >/dev/null 2>&1; do echo "[WAIT] /clock not ready yet"; sleep 1; done
+          - ros2 run rb_controller rb_controller_node --ros-args -p use_sim_time:=true -p signal_mode:=sine_effort -p target_joint:=torso_joint -p effort_amplitude:=0.8 -p effort_frequency_hz:=0.5 2>&1 | tee "$BASE/m3/controller.log"
+      - shell_command:
+          - cd /home/leemou/Projects/RB_Humanoid_Control/ros2_ws
+          - source /opt/ros/humble/setup.bash
+          - source install/setup.bash
+          - echo "[WAIT] sleeping 15s for Isaac startup"
+          - sleep 15
+          - until timeout 1 ros2 topic echo --once /clock >/dev/null 2>&1; do echo "[WAIT] /clock not ready yet"; sleep 1; done
+          - until timeout 1 ros2 topic echo --once /rb/command_raw >/dev/null 2>&1; do echo "[WAIT] /rb/command_raw not ready yet"; sleep 1; done
+          - timeout 12 ros2 topic hz /rb/command_raw | tee "$BASE/m3/command_raw_hz.txt"
+          - ros2 topic echo --once /rb/joint_states > "$BASE/m3/js_before.txt"
+          - sleep 2
+          - ros2 topic echo --once /rb/joint_states > "$BASE/m3/js_after.txt"
+          - diff -u "$BASE/m3/js_before.txt" "$BASE/m3/js_after.txt" | tee "$BASE/m3/joint_diff.txt"
+          - echo "[CAPTURE] command_raw hz + joint diff"
+          - exec bash
