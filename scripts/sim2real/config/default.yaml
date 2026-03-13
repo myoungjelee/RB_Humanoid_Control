@@ -25,11 +25,12 @@ sim2real:
       strict: true
       graph_path: /RBM1Graph
       robot_prim: /World/envs/env_0/Robot/pelvis
+      imu_prim: auto
       tick_source: on_physics_step
       tick_only_playback: false
       tick_frame_period: 0
       frame_ids:
-        imu: imu_link
+        imu: auto
 
   m3_command:
     task: flat
@@ -54,11 +55,12 @@ sim2real:
       strict: true
       graph_path: /RBM3Graph
       robot_prim: /World/envs/env_0/Robot/pelvis
+      imu_prim: auto
       tick_source: on_physics_step
       tick_only_playback: false
       tick_frame_period: 0
       frame_ids:
-        imu: imu_link
+        imu: auto
 
   m5_stand:
     task: stand
@@ -72,6 +74,8 @@ sim2real:
     decimation: 1
     substeps: 1
     robot_usd_path: null
+    spawn_joint_seed_path: ros2_ws/src/rb_bringup/config/stand_qref_g1_seed.yaml
+    spawn_root_height_z: 0.78
     enable_ros2_bridge: true
     bridge_extension: isaacsim.ros2.bridge
     topics:
@@ -84,8 +88,46 @@ sim2real:
       strict: true
       graph_path: /RBM5Graph
       robot_prim: /World/envs/env_0/Robot/pelvis
+      imu_prim: auto
       tick_source: on_physics_step
       tick_only_playback: false
       tick_frame_period: 0
       frame_ids:
-        imu: imu_link
+        imu: auto
+
+  m5_pose_audit:
+    task: stand
+    num_envs: 1
+    steps: -1
+    progress_log_interval_sec: 10.0
+    disable_fabric: false
+    reset_on_done: false
+    sim_dt: 0.005
+    decimation: 1
+    substeps: 1
+    robot_usd_path: null
+    spawn_joint_seed_path: ros2_ws/src/rb_bringup/config/stand_qref_g1_seed.yaml
+    spawn_root_height_z: 0.78
+    pose_audit_relax_arms: true
+    pose_audit_arm_stiffness: 8.0
+    pose_audit_arm_damping: 1.5
+    startup_joint_dump_path: m5/startup_joint_pos.yaml
+    start_paused: true
+    enable_ros2_bridge: false
+    bridge_extension: isaacsim.ros2.bridge
+    topics:
+      joint_states: /rb/joint_states
+      imu: /rb/imu
+      clock: /clock
+      command_raw: /rb/command_safe
+    graph_builder:
+      enabled: false
+      strict: true
+      graph_path: /RBM5PoseAuditGraph
+      robot_prim: /World/envs/env_0/Robot/pelvis
+      imu_prim: auto
+      tick_source: on_physics_step
+      tick_only_playback: false
+      tick_frame_period: 0
+      frame_ids:
+        imu: auto

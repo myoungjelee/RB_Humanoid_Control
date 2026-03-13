@@ -31,7 +31,7 @@ def _run_rollout_phase(
     phase_cfg: dict[str, Any],
     simulation_app: Any,
     *,
-    graph_builder: Any,
+    graph_builder: Any | None,
 ) -> dict[str, Any]:
     """공통 rollout phase 실행기.
 
@@ -52,18 +52,31 @@ def _run_rollout_phase(
         if asset_source:
             print(f"[ASSET] asset_source={asset_source}", flush=True)
 
+        start_paused = bool(phase_cfg.get("start_paused", False))
+        graph_cfg = phase_cfg.get("graph_builder", {})
+        graph_enabled = bool(graph_cfg.get("enabled", True))
+
         # SpotATS 패턴: 타임라인 재생을 명시적으로 켠다.
         try:
             import omni.timeline
 
             timeline = omni.timeline.get_timeline_interface()
-            if not timeline.is_playing():
+            if start_paused:
+                if timeline.is_playing():
+                    timeline.pause()
+            elif not timeline.is_playing():
                 timeline.play()
-            print(f"[TIMELINE] is_playing={timeline.is_playing()}", flush=True)
+            print(
+                f"[TIMELINE] is_playing={timeline.is_playing()} start_paused={start_paused}",
+                flush=True,
+            )
         except Exception as exc:
             print(f"[TIMELINE] warning: failed to control timeline: {type(exc).__name__}: {exc}", flush=True)
 
-        graph_built, graph_note = graph_builder(env=world, phase_cfg=phase_cfg)
+        if graph_enabled and callable(graph_builder):
+            graph_built, graph_note = graph_builder(env=world, phase_cfg=phase_cfg)
+        else:
+            graph_built, graph_note = False, "graph_builder_disabled"
         print(f"[GRAPH] built={graph_built} note={graph_note}", flush=True)
 
         t0 = time.time()
@@ -79,19 +92,34 @@ def _run_rollout_phase(
         )
         last_progress_log_sec = t0
 
-        while simulation_app.is_running() and (infinite_steps or executed_steps < target_steps):
-            world.step(render=True)
-            executed_steps += 1
-            now_sec = time.time()
-            if progress_log_interval_sec > 0.0 and (now_sec - last_progress_log_sec) >= progress_log_interval_sec:
-                print(
-                    f"[HEARTBEAT] steps={executed_steps}/{target_text} elapsed_sec={now_sec - t0:.2f}",
-                    flush=True,
-                )
-                last_progress_log_sec = now_sec
+        if start_paused:
+            print("[POSE_AUDIT] render_only_idle_loop=true", flush=True)
+            update_app = getattr(simulation_app, "update", None)
+            while simulation_app.is_running():
+                if callable(update_app):
+                    update_app()
+                else:
+                    time.sleep(1.0 / 30.0)
+                now_sec = time.time()
+                if progress_log_interval_sec > 0.0 and (now_sec - last_progress_log_sec) >= progress_log_interval_sec:
+                    print(f"[HEARTBEAT] paused elapsed_sec={now_sec - t0:.2f}", flush=True)
+                    last_progress_log_sec = now_sec
+        else:
+            while simulation_app.is_running() and (infinite_steps or executed_steps < target_steps):
+                world.step(render=True)
+                executed_steps += 1
+                now_sec = time.time()
+                if progress_log_interval_sec > 0.0 and (now_sec - last_progress_log_sec) >= progress_log_interval_sec:
+                    print(
+                        f"[HEARTBEAT] steps={executed_steps}/{target_text} elapsed_sec={now_sec - t0:.2f}",
+                        flush=True,
+                    )
+                    last_progress_log_sec = now_sec
 
         elapsed_sec = time.time() - t0
-        if infinite_steps:
+        if start_paused:
+            status = "stopped_gui_closed"
+        elif infinite_steps:
             status = "stopped_no_step_limit"
         else:
             status = "completed_target_steps" if executed_steps >= target_steps else "stopped_early"
@@ -136,4 +164,14 @@ def run_m5_stand_phase(args_cli: Any, phase_cfg: dict[str, Any], simulation_app:
         phase_cfg=phase_cfg,
         simulation_app=simulation_app,
         graph_builder=build_m3_command_graph,
+    )
+
+
+def run_m5_pose_audit_phase(args_cli: Any, phase_cfg: dict[str, Any], simulation_app: Any) -> dict[str, Any]:
+    """M5 pose audit 실행(paused GUI에서 nominal pose를 확인)."""
+    return _run_rollout_phase(
+        args_cli=args_cli,
+        phase_cfg=phase_cfg,
+        simulation_app=simulation_app,
+        graph_builder=None,
     )

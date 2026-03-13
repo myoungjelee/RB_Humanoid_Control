@@ -1,0 +1,33 @@
+session_name: rb_m5_stand_sanity
+start_directory: /home/leemou/Projects/RB_Humanoid_Control
+shell_command_before:
+  - export RUN_ID="${RUN_ID:?Set RUN_ID before tmuxp load}"
+  - export BASE="$HOME/Projects/RB_Humanoid_Control/logs/sim2real/$RUN_ID"
+  - mkdir -p "$BASE/m5"
+windows:
+  - window_name: m5_stand_sanity
+    layout: main-vertical
+    panes:
+      - shell_command:
+          - cd /home/leemou/Projects/RB_Humanoid_Control
+          - python main.py --phase m5_stand 2>&1 | tee "$BASE/m5/isaac.log"
+      - shell_command:
+          - cd /home/leemou/Projects/RB_Humanoid_Control/ros2_ws
+          - source /opt/ros/humble/setup.bash
+          - source install/setup.bash
+          - echo "[WAIT] sleeping 15s for Isaac startup"
+          - sleep 15
+          - until timeout 1 ros2 topic echo --once /clock >/dev/null 2>&1; do echo "[WAIT] /clock not ready yet"; sleep 1; done
+          - timeout 60 ros2 launch rb_controller controller.launch.py params_file:=/home/leemou/Projects/RB_Humanoid_Control/ros2_ws/src/rb_controller/config/scenarios/stand_pd_sanity.yaml 2>&1 | tee "$BASE/m5/m5_stand_sanity.log"
+          - exec bash
+      - shell_command:
+          - echo "[WAIT] waiting for controller start log"
+          - until rg -q "rb_controller started" "$BASE/m5/m5_stand_sanity.log" 2>/dev/null; do sleep 1; done
+          - echo "[WAIT] watching for first safety reason (max 60s)"
+          - 'for i in $(seq 1 60); do if rg -q "safety active: reason=" "$BASE/m5/m5_stand_sanity.log" 2>/dev/null; then echo "[EVENT] first safety reason detected"; sleep 2; break; fi; sleep 1; done'
+          - 'if ! rg -q "safety active: reason=" "$BASE/m5/m5_stand_sanity.log" 2>/dev/null; then echo "[FALLBACK] no safety reason within 60s"; fi'
+          - rg "rb_controller started|stand_control_joints|stand_tilt_cut|tilt_feedback" "$BASE/m5/m5_stand_sanity.log" | head -n 12 | tee "$BASE/m5/start.txt"
+          - 'rg "safety active: reason=" "$BASE/m5/m5_stand_sanity.log" | sed -E ''s/.*reason=([A-Z_]+).*/\\1/'' | sort | uniq -c | tee "$BASE/m5/reason_count.txt"'
+          - rg "loop_stats" "$BASE/m5/m5_stand_sanity.log" | tail -n 8 | tee "$BASE/m5/loop_tail.txt"
+          - echo "[CAPTURE] stand_pd_sanity + reason_count + loop_tail"
+          - exec bash

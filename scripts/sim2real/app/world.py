@@ -9,8 +9,11 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Any
+
+import yaml
 
 TASK_ID_BY_SHORT = {
     # stand 키는 M5에서 의도를 명확히 보이기 위한 alias다.
@@ -112,6 +115,105 @@ def _resolve_robot_usd_path(phase_cfg: dict[str, Any]) -> str | None:
     return str(usd_path)
 
 
+def _resolve_spawn_joint_seed_path(phase_cfg: dict[str, Any]) -> str | None:
+    """standalone direct spawn에 쓸 spawn joint seed YAML 경로를 정규화한다."""
+    seed_path = phase_cfg.get("spawn_joint_seed_path")
+    if not seed_path:
+        return None
+    path = Path(str(seed_path)).expanduser()
+    if not path.is_absolute():
+        path = PROJECT_ROOT / path
+    path = path.resolve()
+    if not path.exists():
+        raise FileNotFoundError(f"spawn_joint_seed_path not found: {path}")
+    return str(path)
+
+
+def _resolve_spawn_root_height_z(phase_cfg: dict[str, Any]) -> float | None:
+    """standalone direct spawn 시작 root z override를 읽는다."""
+    value = phase_cfg.get("spawn_root_height_z")
+    if value is None:
+        return None
+    return float(value)
+
+
+def _resolve_pose_audit_relax_arms(phase_cfg: dict[str, Any]) -> bool:
+    """pose audit에서 arm actuator stiffness/damping을 완화할지 반환."""
+    return bool(phase_cfg.get("pose_audit_relax_arms", False))
+
+
+def _resolve_pose_audit_arm_stiffness(phase_cfg: dict[str, Any]) -> float:
+    """pose audit arm actuator stiffness override를 읽는다."""
+    return float(phase_cfg.get("pose_audit_arm_stiffness", 8.0))
+
+
+def _resolve_pose_audit_arm_damping(phase_cfg: dict[str, Any]) -> float:
+    """pose audit arm actuator damping override를 읽는다."""
+    return float(phase_cfg.get("pose_audit_arm_damping", 1.5))
+
+
+def _load_named_joint_seed_values(seed_path: str) -> dict[str, float]:
+    """joint-name -> q_ref 형식의 YAML에서 spawn용 exact joint seed map을 읽는다."""
+    with Path(seed_path).open("r", encoding="utf-8") as f:
+        data = yaml.safe_load(f) or {}
+    named = data.get("named_seed_values")
+    if not isinstance(named, dict) or not named:
+        raise RuntimeError(f"named_seed_values not found in spawn joint seed YAML: {seed_path}")
+    return {str(name): float(value) for name, value in named.items()}
+
+
+def _resolve_startup_joint_dump_path(phase_cfg: dict[str, Any]) -> Path | None:
+    """startup joint pose dump 경로를 정규화한다.
+
+    규칙:
+    - 절대경로면 그대로 사용
+    - 상대경로면 `BASE` 환경변수가 있으면 그 아래로 쓴다
+    - 없으면 프로젝트 루트 기준으로 쓴다
+    """
+    dump_path = phase_cfg.get("startup_joint_dump_path")
+    if not dump_path:
+        return None
+    path = Path(str(dump_path)).expanduser()
+    if path.is_absolute():
+        return path
+    base = os.environ.get("BASE")
+    if base:
+        return (Path(base).expanduser() / path).resolve()
+    return (PROJECT_ROOT / path).resolve()
+
+
+def _dump_startup_joint_state(
+    *,
+    robot: Any,
+    default_root_state: Any,
+    default_joint_pos: Any,
+    default_joint_vel: Any,
+    dump_path: Path,
+) -> None:
+    """env_0 startup pose를 YAML로 저장한다."""
+    joint_names = list(getattr(robot, "joint_names"))
+    joint_pos_env0 = default_joint_pos[0].detach().cpu().tolist()
+    joint_vel_env0 = default_joint_vel[0].detach().cpu().tolist()
+    root_state_env0 = default_root_state[0].detach().cpu().tolist()
+
+    payload = {
+        "joint_count": len(joint_names),
+        "joint_order": joint_names,
+        "startup_joint_pos": [float(v) for v in joint_pos_env0],
+        "startup_joint_vel": [float(v) for v in joint_vel_env0],
+        "named_joint_pos": {name: float(val) for name, val in zip(joint_names, joint_pos_env0)},
+        "named_joint_vel": {name: float(val) for name, val in zip(joint_names, joint_vel_env0)},
+        "startup_root_pos_xyz": [float(v) for v in root_state_env0[0:3]],
+        "startup_root_quat_wxyz": [float(v) for v in root_state_env0[3:7]],
+        "startup_root_linvel_xyz": [float(v) for v in root_state_env0[7:10]],
+        "startup_root_angvel_xyz": [float(v) for v in root_state_env0[10:13]],
+        "note": "Captured from robot.data.default_* immediately after standalone direct-spawn reset.",
+    }
+    dump_path.parent.mkdir(parents=True, exist_ok=True)
+    dump_path.write_text(yaml.safe_dump(payload, sort_keys=False), encoding="utf-8")
+    print(f"[CONFIG] wrote startup_joint_dump_path={dump_path}", flush=True)
+
+
 def _build_direct_g1_scene_cfg(phase_cfg: dict[str, Any]) -> tuple[Any, str]:
     """direct spawn용 G1 scene cfg를 구성한다."""
     import isaaclab.sim as sim_utils
@@ -122,6 +224,19 @@ def _build_direct_g1_scene_cfg(phase_cfg: dict[str, Any]) -> tuple[Any, str]:
 
     robot_cfg = G1_CFG.copy()
     robot_cfg.prim_path = "{ENV_REGEX_NS}/Robot"
+    if _resolve_pose_audit_relax_arms(phase_cfg):
+        arms_actuator = robot_cfg.actuators.get("arms")
+        if arms_actuator is not None:
+            arms_actuator.stiffness = _resolve_pose_audit_arm_stiffness(phase_cfg)
+            arms_actuator.damping = _resolve_pose_audit_arm_damping(phase_cfg)
+            print(
+                "[CONFIG] pose_audit_relax_arms=true "
+                f"stiffness={arms_actuator.stiffness} damping={arms_actuator.damping}",
+                flush=True,
+            )
+    spawn_seed_path = _resolve_spawn_joint_seed_path(phase_cfg)
+    if spawn_seed_path:
+        robot_cfg.init_state.joint_pos = _load_named_joint_seed_values(spawn_seed_path)
 
     robot_usd_path = _resolve_robot_usd_path(phase_cfg)
     if robot_usd_path:
@@ -143,6 +258,12 @@ def _build_direct_g1_scene_cfg(phase_cfg: dict[str, Any]) -> tuple[Any, str]:
         num_envs=int(phase_cfg["num_envs"]),
         env_spacing=float(phase_cfg.get("env_spacing", 2.0)),
     )
+    if spawn_seed_path:
+        print(
+            f"[CONFIG] applying spawn_joint_seed_path={spawn_seed_path}"
+            f" joint_count={len(robot_cfg.init_state.joint_pos)}",
+            flush=True,
+        )
     return scene_cfg, str(robot_cfg.spawn.usd_path)
 
 
@@ -170,5 +291,31 @@ def create_standalone_world(args_cli: Any, phase_cfg: dict[str, Any]):
     scene_cfg, asset_source = _build_direct_g1_scene_cfg(phase_cfg)
     scene = InteractiveScene(scene_cfg)
     sim.reset()
+    robot = scene["robot"]
+    default_root_state = robot.data.default_root_state.clone()
+    spawn_root_height_z = _resolve_spawn_root_height_z(phase_cfg)
+    if spawn_root_height_z is not None:
+        default_root_state[:, 2] = spawn_root_height_z
+        print(f"[CONFIG] applying spawn_root_height_z={spawn_root_height_z:.3f}", flush=True)
+    default_root_state[:, 0:3] += scene.env_origins
+    robot.write_root_pose_to_sim(default_root_state[:, :7])
+    robot.write_root_velocity_to_sim(default_root_state[:, 7:])
+    default_joint_pos = robot.data.default_joint_pos.clone()
+    default_joint_vel = robot.data.default_joint_vel.clone()
+    robot.write_joint_state_to_sim(default_joint_pos, default_joint_vel)
+    # implicit actuator targets도 동일 pose로 맞춰 spawn 직후 재수렴을 줄인다.
+    robot.set_joint_position_target(default_joint_pos)
+    robot.set_joint_velocity_target(default_joint_vel)
+    scene.write_data_to_sim()
+
+    startup_dump_path = _resolve_startup_joint_dump_path(phase_cfg)
+    if startup_dump_path is not None:
+        _dump_startup_joint_state(
+            robot=robot,
+            default_root_state=default_root_state,
+            default_joint_pos=default_joint_pos,
+            default_joint_vel=default_joint_vel,
+            dump_path=startup_dump_path,
+        )
 
     return task_id, StandaloneDirectWorld(sim=sim, scene=scene, asset_source=asset_source), asset_source

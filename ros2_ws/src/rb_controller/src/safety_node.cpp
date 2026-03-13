@@ -31,6 +31,7 @@ public:
     input_joint_states_topic_ = this->declare_parameter<std::string>(
         "input_joint_states_topic", "/rb/joint_states");
     imu_topic_ = this->declare_parameter<std::string>("imu_topic", "/rb/imu");
+    imu_zero_on_start_ = this->declare_parameter<bool>("imu_zero_on_start", false);
 
     safety_enabled_ = this->declare_parameter<bool>("safety_enabled", true);
     safe_mode_action_ = this->declare_parameter<std::string>("safe_mode_action", "zero_effort");
@@ -85,10 +86,10 @@ public:
 
     RCLCPP_INFO(
         this->get_logger(),
-        "rb_safety started: in=%s out=%s js=%s imu=%s safety=%s limits=%zu",
+        "rb_safety started: in=%s out=%s js=%s imu=%s safety=%s imu_zero_on_start=%s limits=%zu",
         input_command_topic_.c_str(), output_command_topic_.c_str(),
         input_joint_states_topic_.c_str(), imu_topic_.c_str(),
-        (safety_enabled_ ? "on" : "off"), joint_limits_.size());
+        (safety_enabled_ ? "on" : "off"), imu_zero_on_start_ ? "on" : "off", joint_limits_.size());
   }
 
 private:
@@ -156,6 +157,14 @@ private:
       if (name == "safety_enabled")
       {
         safety_enabled_ = param.as_bool();
+        continue;
+      }
+      if (name == "imu_zero_on_start")
+      {
+        imu_zero_on_start_ = param.as_bool();
+        imu_bias_captured_ = false;
+        imu_roll_bias_rad_ = 0.0;
+        imu_pitch_bias_rad_ = 0.0;
         continue;
       }
       if (name == "safe_mode_action")
@@ -244,9 +253,10 @@ private:
 
     RCLCPP_INFO(
         this->get_logger(),
-        "runtime safety parameters updated: safety=%s safe_mode=%s effort_max=%.3f margin=%.4f timeout=%.3f tilt_limit=[%.3f,%.3f] debug(joint/tilt)=%s/%s",
+        "runtime safety parameters updated: safety=%s safe_mode=%s imu_zero=%s effort_max=%.3f margin=%.4f timeout=%.3f tilt_limit=[%.3f,%.3f] debug(joint/tilt)=%s/%s",
         safety_enabled_ ? "on" : "off",
         safe_mode_action_.c_str(),
+        imu_zero_on_start_ ? "on" : "off",
         effort_abs_max_default_,
         joint_limit_margin_rad_,
         input_timeout_sec_,
@@ -310,10 +320,26 @@ private:
 
     const double sinr_cosp = 2.0 * (w * x + y * z);
     const double cosr_cosp = 1.0 - 2.0 * (x * x + y * y);
-    latest_roll_rad_ = std::atan2(sinr_cosp, cosr_cosp);
+    const double roll = std::atan2(sinr_cosp, cosr_cosp);
 
     const double sinp = 2.0 * (w * y - z * x);
-    latest_pitch_rad_ = std::asin(std::clamp(sinp, -1.0, 1.0));
+    const double pitch = std::asin(std::clamp(sinp, -1.0, 1.0));
+
+    if (imu_zero_on_start_ && !imu_bias_captured_)
+    {
+      imu_roll_bias_rad_ = roll;
+      imu_pitch_bias_rad_ = pitch;
+      imu_bias_captured_ = true;
+      RCLCPP_INFO(
+          this->get_logger(),
+          "imu bias captured: roll=%.3f pitch=%.3f",
+          imu_roll_bias_rad_, imu_pitch_bias_rad_);
+    }
+
+    const double roll_bias = imu_zero_on_start_ ? imu_roll_bias_rad_ : 0.0;
+    const double pitch_bias = imu_zero_on_start_ ? imu_pitch_bias_rad_ : 0.0;
+    latest_roll_rad_ = normalize_angle_rad(roll - roll_bias);
+    latest_pitch_rad_ = pitch - pitch_bias;
 
     latest_imu_received_ = true;
     latest_imu_time_steady_ = std::chrono::steady_clock::now();
@@ -747,6 +773,11 @@ private:
     }
   }
 
+  static double normalize_angle_rad(const double angle_rad)
+  {
+    return std::atan2(std::sin(angle_rad), std::cos(angle_rad));
+  }
+
   std::string input_command_topic_{"/rb/command_raw"};
   std::string output_command_topic_{"/rb/command_safe"};
   std::string input_joint_states_topic_{"/rb/joint_states"};
@@ -782,8 +813,12 @@ private:
 
   bool latest_joint_state_received_{false};
   bool latest_imu_received_{false};
+  bool imu_zero_on_start_{false};
+  bool imu_bias_captured_{false};
   double latest_roll_rad_{0.0};
   double latest_pitch_rad_{0.0};
+  double imu_roll_bias_rad_{0.0};
+  double imu_pitch_bias_rad_{0.0};
 
   rclcpp::Publisher<sensor_msgs::msg::JointState>::SharedPtr command_pub_;
   rclcpp::Subscription<sensor_msgs::msg::JointState>::SharedPtr command_sub_;

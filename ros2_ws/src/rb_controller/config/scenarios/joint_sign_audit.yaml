@@ -1,0 +1,27 @@
+rb_controller:
+  ros__parameters:
+    # sign audit는 자세 제어가 아니라 단일 joint의 응답 방향만 확인한다.
+    signal_mode: zero
+    target_joint: left_hip_pitch_joint
+    effort_amplitude: 1.0
+    step_start_sec: 0.5
+    input_joint_states_topic: /rb/joint_states
+    output_command_raw_topic: /rb/command_raw
+    enable_tilt_feedback: false
+    stand_hold_current_on_start: false
+    stand_q_ref: [0.0]
+
+rb_safety:
+  ros__parameters:
+    input_command_topic: /rb/command_raw
+    output_command_topic: /rb/command_safe
+    input_joint_states_topic: /rb/joint_states
+    # sign audit는 raw command 방향 확인이 목적이라 safety는 끈다.
+    safety_enabled: false
+    safe_mode_action: zero_effort
+    effort_abs_max_default: 8.0
+    joint_limit_margin_rad: 0.0
+    input_timeout_sec: 5.0
+    tilt_limit_roll_rad: 10.0
+    tilt_limit_pitch_rad: 10.0
+    imu_topic: /rb/imu

@@ -1,0 +1,40 @@
+session_name: rb_joint_sign
+start_directory: /home/leemou/Projects/RB_Humanoid_Control
+shell_command_before:
+  - export RUN_ID="${RUN_ID:?Set RUN_ID before tmuxp load}"
+  - export BASE="$HOME/Projects/RB_Humanoid_Control/logs/sim2real/$RUN_ID"
+  - mkdir -p "$BASE/sign"
+windows:
+  - window_name: joint_sign
+    layout: main-vertical
+    panes:
+      - shell_command:
+          - cd /home/leemou/Projects/RB_Humanoid_Control
+          - python main.py --phase m3_command 2>&1 | tee "$BASE/sign/isaac.log"
+      - shell_command:
+          - cd /home/leemou/Projects/RB_Humanoid_Control/ros2_ws
+          - source /opt/ros/humble/setup.bash
+          - source install/setup.bash
+          - until timeout 1 ros2 topic echo --once /clock >/dev/null 2>&1; do echo "[WAIT] /clock not ready yet"; sleep 1; done
+          - ros2 launch rb_controller controller.launch.py params_file:=/home/leemou/Projects/RB_Humanoid_Control/ros2_ws/src/rb_controller/config/scenarios/joint_sign_audit.yaml 2>&1 | tee "$BASE/sign/launch.log"
+      - shell_command:
+          - cd /home/leemou/Projects/RB_Humanoid_Control/ros2_ws
+          - source /opt/ros/humble/setup.bash
+          - source install/setup.bash
+          - export TARGET_JOINT="${TARGET_JOINT:-left_hip_pitch_joint}"
+          - export STEP_AMP="${STEP_AMP:-1.0}"
+          - export STEP_CAPTURE_SEC="${STEP_CAPTURE_SEC:-1.2}"
+          - until timeout 1 ros2 topic echo --once /clock >/dev/null 2>&1; do echo "[WAIT] /clock not ready yet"; sleep 1; done
+          - until timeout 1 ros2 topic echo --once /rb/joint_states >/dev/null 2>&1; do echo "[WAIT] /rb/joint_states not ready yet"; sleep 1; done
+          - until rg -q "rb_controller started" "$BASE/sign/launch.log" 2>/dev/null; do echo "[WAIT] waiting for controller start log"; sleep 1; done
+          - ros2 topic echo --once /rb/joint_states > "$BASE/sign/js_before.txt"
+          - ros2 param set /rb_controller target_joint "$TARGET_JOINT"
+          - ros2 param set /rb_controller effort_amplitude "$STEP_AMP"
+          - ros2 param set /rb_controller step_start_sec 0.5
+          - ros2 param set /rb_controller signal_mode step_effort
+          - sleep "$STEP_CAPTURE_SEC"
+          - ros2 topic echo --once /rb/joint_states > "$BASE/sign/js_after.txt"
+          - ros2 param set /rb_controller signal_mode zero
+          - python3 /home/leemou/Projects/RB_Humanoid_Control/scripts/sim2real/joint_state_delta.py --before "$BASE/sign/js_before.txt" --after "$BASE/sign/js_after.txt" --joint "$TARGET_JOINT" | tee "$BASE/sign/delta.txt"
+          - echo "[CAPTURE] target_joint=$TARGET_JOINT step_amp=$STEP_AMP numeric delta"
+          - exec bash

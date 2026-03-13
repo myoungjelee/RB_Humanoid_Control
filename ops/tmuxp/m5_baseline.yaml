@@ -21,8 +21,11 @@ windows:
           - timeout 60 ros2 launch rb_controller controller.launch.py params_file:=/home/leemou/Projects/RB_Humanoid_Control/ros2_ws/src/rb_controller/config/scenarios/baseline_zero.yaml 2>&1 | tee "$BASE/m5/m5_baseline.log"
           - exec bash
       - shell_command:
-          - echo "[WAIT] sleeping 80s before log summary"
-          - sleep 80
+          - echo "[WAIT] waiting for controller start log"
+          - until rg -q "rb_controller started" "$BASE/m5/m5_baseline.log" 2>/dev/null; do sleep 1; done
+          - echo "[WAIT] watching for first safety reason (max 60s)"
+          - 'for i in $(seq 1 60); do if rg -q "safety active: reason=" "$BASE/m5/m5_baseline.log" 2>/dev/null; then echo "[EVENT] first safety reason detected"; sleep 2; break; fi; sleep 1; done'
+          - 'if ! rg -q "safety active: reason=" "$BASE/m5/m5_baseline.log" 2>/dev/null; then echo "[FALLBACK] no safety reason within 60s"; fi'
           - rg "rb_controller started" "$BASE/m5/m5_baseline.log" | head -n 1 | tee "$BASE/m5/start.txt"
           - 'rg "safety active: reason=" "$BASE/m5/m5_baseline.log" | sed -E ''s/.*reason=([A-Z_]+).*/\\1/'' | sort | uniq -c | tee "$BASE/m5/reason_count.txt"'
           - rg "loop_stats" "$BASE/m5/m5_baseline.log" | tail -n 8 | tee "$BASE/m5/loop_tail.txt"

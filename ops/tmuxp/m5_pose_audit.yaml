@@ -1,0 +1,26 @@
+session_name: rb_m5_pose_audit
+start_directory: /home/leemou/Projects/RB_Humanoid_Control
+shell_command_before:
+  - export RUN_ID="${RUN_ID:?Set RUN_ID before tmuxp load}"
+  - export BASE="$HOME/Projects/RB_Humanoid_Control/logs/sim2real/$RUN_ID"
+  - mkdir -p "$BASE/m5"
+windows:
+  - window_name: m5_pose_audit
+    layout: even-horizontal
+    panes:
+      - shell_command:
+          - cd /home/leemou/Projects/RB_Humanoid_Control
+          - python main.py --phase m5_pose_audit 2>&1 | tee "$BASE/m5/isaac.log"
+      - shell_command:
+          - echo "[INFO] pose audit mode"
+          - echo "[INFO] timeline starts paused, controller is not launched"
+          - echo "[INFO] read shape in GUI, but use startup_joint_pos.yaml as source of truth"
+          - 'echo "[INFO] expected dump path: $BASE/m5/startup_joint_pos.yaml"'
+          - echo "[INFO] recommended joints:"
+          - echo "  left/right_hip_pitch_joint"
+          - echo "  left/right_knee_joint"
+          - echo "  left/right_ankle_pitch_joint"
+          - echo "  left/right_shoulder_pitch_joint"
+          - echo "  left/right_elbow_pitch_joint"
+          - echo "  left/right_shoulder_roll_joint"
+          - exec bash

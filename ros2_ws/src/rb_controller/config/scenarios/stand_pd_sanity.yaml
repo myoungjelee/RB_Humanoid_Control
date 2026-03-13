@@ -1,0 +1,158 @@
+rb_controller:
+  ros__parameters:
+    signal_mode: stand_pd
+    # M5 진입 전 무외란 기본 stand를 먼저 확보하기 위한 sanity 설정.
+    stand_kp: 60.0
+    stand_kd: 4.0
+    stand_effort_abs_max: 12.0
+    stand_hold_current_on_start: false
+    stand_q_ref:
+      [
+        -0.02,
+        -0.02,
+        0.0,
+        0.0,
+        0.0,
+        0.26,
+        0.26,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.08,
+        0.08,
+        0.0,
+        0.0,
+        -0.03,
+        -0.03,
+        0.50,
+        0.50,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        1.0,
+        0.0,
+        0.0,
+        -1.0,
+        0.52,
+        -0.52,
+      ]
+    # 전 관절을 다 잡지 말고 하체+몸통만 먼저 안정화 대상으로 둔다.
+    stand_control_joints:
+      [
+        left_hip_pitch_joint,
+        right_hip_pitch_joint,
+        torso_joint,
+        left_hip_roll_joint,
+        right_hip_roll_joint,
+        left_hip_yaw_joint,
+        right_hip_yaw_joint,
+        left_knee_joint,
+        right_knee_joint,
+        left_ankle_pitch_joint,
+        right_ankle_pitch_joint,
+        left_ankle_roll_joint,
+        right_ankle_roll_joint,
+      ]
+    stand_pos_error_abs_max: 0.18
+    stand_kp_scale_hip: 1.5
+    stand_kd_scale_hip: 1.2
+    stand_kp_scale_knee: 1.2
+    stand_kd_scale_knee: 1.0
+    stand_kp_scale_ankle: 3.0
+    stand_kd_scale_ankle: 2.0
+    stand_kp_scale_torso: 2.0
+    stand_kd_scale_torso: 1.5
+    imu_zero_on_start: true
+    # IMU zeroing과 fixed q_ref가 정리된 뒤에는 tilt 보정을 다시 켜서
+    # pose hold보다 실제 standing time이 늘어나는지 본다.
+    stand_tilt_cut_enable: false
+    enable_tilt_feedback: true
+    # 직접 effort를 더하는 대신, nominal q_ref를 기울기 기준으로 조금씩 수정한다.
+    tilt_apply_mode: qref_bias
+    tilt_qref_bias_abs_max: 0.15
+    tilt_kp_pitch: 18.0
+    tilt_kd_pitch: 3.0
+    tilt_effort_abs_max: 4.0
+    tilt_weight_pitch_hip: 0.9
+    tilt_weight_pitch_ankle: 0.6
+    tilt_weight_pitch_knee: 0.15
+    tilt_weight_pitch_torso: 0.05
+    limit_avoid_enable: true
+    limit_avoid_margin_rad: 0.08
+    limit_avoid_kp: 10.0
+    limit_avoid_kd: 2.0
+    limit_avoid_joint_names:
+      [
+        left_hip_pitch_joint,
+        right_hip_pitch_joint,
+        torso_joint,
+        left_hip_roll_joint,
+        right_hip_roll_joint,
+        left_hip_yaw_joint,
+        right_hip_yaw_joint,
+        left_knee_joint,
+        right_knee_joint,
+        left_ankle_pitch_joint,
+        right_ankle_pitch_joint,
+        left_ankle_roll_joint,
+        right_ankle_roll_joint,
+      ]
+    limit_avoid_lower:
+      [
+        -2.349999711181,
+        -2.349999711181,
+        -2.618000003262,
+        -0.259999973074,
+        -2.529999839782,
+        -2.749999849008,
+        -2.749999849008,
+        -0.334889977074,
+        -0.334889977074,
+        -0.75,
+        -0.75,
+        -0.261799970366,
+        -0.261799970366,
+      ]
+    limit_avoid_upper:
+      [
+        3.049999885799,
+        3.049999885799,
+        2.618000003262,
+        2.529999839782,
+        0.259999973074,
+        2.749999849008,
+        2.749999849008,
+        2.544899693449,
+        2.544899693449,
+        0.729999951929,
+        0.729999951929,
+        0.261799970366,
+        0.261799970366,
+      ]
+
+rb_safety:
+  ros__parameters:
+    input_command_topic: /rb/command_raw
+    output_command_topic: /rb/command_safe
+    input_joint_states_topic: /rb/joint_states
+    # stand bring-up 단계에서는 controller authority를 먼저 보기 위해 safety를 끈다.
+    safety_enabled: false
+    safe_mode_action: zero_effort
+    effort_abs_max_default: 8.0
+    joint_limit_margin_rad: 0.0
+    input_timeout_sec: 1.0
+    # no-disturbance stand sanity에서는 IMU tilt 해석 이슈를 분리하기 위해 TILT safety를 완전히 배제한다.
+    tilt_limit_roll_rad: 10.0
+    tilt_limit_pitch_rad: 10.0
+    imu_topic: /rb/imu
+    imu_zero_on_start: true

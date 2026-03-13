@@ -15,7 +15,7 @@
 - 재검증 순서는 아래로 고정한다.
 
 ```text
-M1 -> M2 -> M3 -> M4(clamp/joint_limit/timeout/tilt) -> M5 baseline
+M1 -> M2 -> M3 -> M4(clamp/joint_limit/timeout/tilt) -> M5 stand_sanity -> M5 baseline -> M5 stand
 ```
 
 - milestone 실행은 `tmuxp` YAML을 사용한다.
@@ -292,12 +292,51 @@ logs/sim2real/$RUN_ID/m4/tilt/loop_tail.txt
 M4 통과 기준:
 - 각 scenario에서 해당 reason이 최소 1회 보임
 
-### M5 — Baseline
+### M5 — Stand Sanity / Baseline / Stand
 
 목표:
-- direct spawn standalone backend 기준 `M5 baseline 60초` 재확보
-- baseline은 `stand controller off`, 즉 `signal_mode=zero` 상태를 뜻한다
-- `stand_pd` 기본 실행은 별도 시나리오(`stand_pd_default.yaml`)로 분리한다
+- direct spawn standalone backend 기준 `stand_pd_sanity`, `baseline_zero`, `stand_pd_default`를 순서대로 재확보
+- disturbance 이전에 no-disturbance `stand`가 먼저 성립하는지 확인
+- baseline은 `signal_mode=zero` 상태를 뜻한다
+- stand sanity는 `stand_pd_sanity.yaml` 기준 실행이다
+- final stand는 `stand_pd_default.yaml` 기준 실행이다
+
+#### M5-0 Stand Sanity
+
+실행:
+
+```bash
+cd ~/Projects/RB_Humanoid_Control
+source "$HOME/miniconda3/etc/profile.d/conda.sh"
+conda activate isaac
+RUN_ID=$(date +%Y%m%d-%H%M%S)_m5_stand_sanity_standalone tmuxp load -y ops/tmuxp/m5_stand_sanity.yaml
+```
+
+자동 저장 로그:
+
+```text
+logs/sim2real/$RUN_ID/m5/isaac.log
+logs/sim2real/$RUN_ID/m5/m5_stand_sanity.log
+logs/sim2real/$RUN_ID/m5/start.txt
+logs/sim2real/$RUN_ID/m5/reason_count.txt
+logs/sim2real/$RUN_ID/m5/loop_tail.txt
+```
+
+캡처:
+- 파일명: `reports/sim2real/images/standalone_backend/m5_stand_sanity_standalone.png`
+- 화면 기준:
+  - `rb_controller started: ... signal_mode=stand_pd`
+  - `stand_control_joints active`
+  - `tilt_feedback=off`, `stand_tilt_cut=off`
+  - `reason_count`
+  - `loop_tail`
+
+통과 기준:
+- no-disturbance 상태에서 `stand_pd_sanity`가 20~30초 이상 기본 stand 유지
+- `reason_count.txt`, `loop_tail.txt` 생성
+- 이 단계가 안 되면 disturbance로 넘어가지 않음
+
+#### M5-1 Baseline
 
 실행:
 
@@ -329,6 +368,38 @@ logs/sim2real/$RUN_ID/m5/loop_tail.txt
 - `signal_mode=zero` baseline 60초 로그 확보
 - `reason_count.txt`, `loop_tail.txt` 생성
 
+#### M5-2 Stand
+
+실행:
+
+```bash
+cd ~/Projects/RB_Humanoid_Control
+source "$HOME/miniconda3/etc/profile.d/conda.sh"
+conda activate isaac
+RUN_ID=$(date +%Y%m%d-%H%M%S)_m5_stand_standalone tmuxp load -y ops/tmuxp/m5_stand.yaml
+```
+
+자동 저장 로그:
+
+```text
+logs/sim2real/$RUN_ID/m5/isaac.log
+logs/sim2real/$RUN_ID/m5/m5_stand.log
+logs/sim2real/$RUN_ID/m5/start.txt
+logs/sim2real/$RUN_ID/m5/reason_count.txt
+logs/sim2real/$RUN_ID/m5/loop_tail.txt
+```
+
+캡처:
+- 파일명: `reports/sim2real/images/standalone_backend/m5_stand_standalone.png`
+- 화면 기준:
+  - `rb_controller started: ... signal_mode=stand_pd`
+  - `reason_count`
+  - `loop_tail`
+
+통과 기준:
+- `signal_mode=stand_pd` stand 60초 로그 확보
+- `reason_count.txt`, `loop_tail.txt` 생성
+
 ## 4. 재검증 후 문서 수정 순서
 
 마일스톤 재검증이 끝난 뒤 아래 순서로 문서를 수정한다.
@@ -347,6 +418,7 @@ logs/sim2real/$RUN_ID/m5/loop_tail.txt
 ## 5. 운영 메모
 
 - `M1/M3/M4/M5` 캡처는 final evidence 기준으로 새로 만든다
+- `M5`는 `stand_sanity -> baseline -> stand` 순서로 본 뒤에만 disturbance 값 탐색으로 넘어간다
 - `M2` old 캡처는 재사용 가능하지만, 일관성을 위해 standalone 기준으로 다시 따는 것을 권장한다
 - 모든 old evidence는 내부 개발 히스토리로 보관한다
 - 실행 중 `isaaclab` import 에러가 나면 `tmuxp`를 띄운 현재 셸에서 `conda activate isaac`가 빠진 경우를 먼저 확인한다

@@ -41,6 +41,27 @@ def _stage_has_prim(path: str) -> bool:
         return False
 
 
+def _find_descendant_prim(root_path: str, prim_name: str) -> str | None:
+    """root_path 하위에서 basename이 prim_name인 prim을 찾는다."""
+    try:
+        import omni.usd
+
+        stage = omni.usd.get_context().get_stage()
+        if stage is None:
+            return None
+
+        root_prefix = root_path.rstrip("/") + "/"
+        for prim in stage.TraverseAll():
+            path = str(prim.GetPath())
+            if not path.startswith(root_prefix):
+                continue
+            if path.rsplit("/", 1)[-1] == prim_name:
+                return path
+    except Exception:
+        return None
+    return None
+
+
 def _resolve_robot_prim(env: Any, override: str | None) -> str:
     """robot prim 경로를 자동 탐색하거나 override 값을 사용한다."""
     normalized_override = _normalize_prim_path(override) if override else None
@@ -112,6 +133,21 @@ def _resolve_robot_prim(env: Any, override: str | None) -> str:
     return expanded[0]
 
 
+def _resolve_imu_prim(robot_prim: str, override: str | None) -> tuple[str, str]:
+    """IMU source prim을 찾고, frame_id 기본값도 함께 반환한다."""
+    normalized_override = _normalize_prim_path(override) if override else None
+    if normalized_override and _stage_has_prim(normalized_override):
+        return normalized_override, normalized_override.rsplit("/", 1)[-1]
+
+    search_root = robot_prim.rsplit("/", 1)[0] if "/" in robot_prim.rstrip("/") else robot_prim
+    for prim_name in ("imu_link", "torso_link", robot_prim.rsplit("/", 1)[-1]):
+        candidate = _find_descendant_prim(search_root, prim_name)
+        if candidate:
+            return candidate, prim_name
+
+    return robot_prim, robot_prim.rsplit("/", 1)[-1]
+
+
 def _build_sensor_graph(
     env: Any,
     phase_cfg: dict[str, Any],
@@ -134,7 +170,8 @@ def _build_sensor_graph(
     frame_cfg = graph_cfg.get("frame_ids", {})
     topics = phase_cfg.get("topics", {})
 
-    frame_imu = str(frame_cfg.get("imu", "imu_link"))
+    frame_imu_cfg = frame_cfg.get("imu", "auto")
+    frame_imu = str(frame_imu_cfg)
     topic_joint = str(topics.get("joint_states", "/rb/joint_states"))
     topic_imu = str(topics.get("imu", "/rb/imu"))
     topic_command_raw = str(topics.get("command_raw", "/rb/command_raw"))
@@ -173,6 +210,9 @@ def _build_sensor_graph(
         import omni.graph.core as og
 
         robot_prim = _resolve_robot_prim(env, graph_cfg.get("robot_prim"))
+        imu_prim, imu_frame_default = _resolve_imu_prim(robot_prim, graph_cfg.get("imu_prim"))
+        if frame_imu.lower() == "auto":
+            frame_imu = imu_frame_default
         keys = og.Controller.Keys
 
         graph_spec: dict[str, Any] = {
@@ -209,7 +249,7 @@ def _build_sensor_graph(
         set_values: list[tuple[str, Any]] = [
             ("JointStatePub.inputs:targetPrim", robot_prim),
             ("JointStatePub.inputs:topicName", topic_joint),
-            ("OdomCompute.inputs:chassisPrim", robot_prim),
+            ("OdomCompute.inputs:chassisPrim", imu_prim),
             ("ImuPub.inputs:topicName", topic_imu),
             ("ImuPub.inputs:frameId", frame_imu),
             ("ImuPub.inputs:publishOrientation", True),
@@ -268,6 +308,7 @@ def _build_sensor_graph(
             True,
             (
                 f"{graph_path} robot_prim={robot_prim}"
+                f" imu_prim={imu_prim} frame_imu={frame_imu}"
                 f" tick_node={tick_node_type} tick_output={tick_output_port} only_playback={tick_only_playback}"
                 f" frame_period={tick_frame_period} evaluator={evaluator_name}"
                 f" command_apply={include_command_apply} command_topic={topic_command_raw}"
