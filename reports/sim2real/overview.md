@@ -119,6 +119,9 @@ Stage1(`reports/stage1/*`)은 baseline 자산으로 유지하고, 본 문서는 
   - no-disturbance에서도 `1~2초` 안쪽 전방 붕괴
 - 왜 이 단계가 필요했나:
   - disturbance 이전에 stand 자체가 성립하는지부터 확인해야 하기 때문
+- 구조 메모:
+  - 현재 M5의 standing controller는 raw joint/IMU feedback를 직접 사용하는 경량 bring-up 구조다
+  - state estimator 분리는 후속 milestone(M11)에서 진행한다
 - 여기서 한 일:
   - `stand_pd_sanity` 경로 분리
   - controller-only bring-up

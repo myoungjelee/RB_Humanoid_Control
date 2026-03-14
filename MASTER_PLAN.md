@@ -228,6 +228,9 @@ controller를 바로 actuator에 연결하지 않고
 
 no-disturbance standing을 확보한다.
 
+현재 M5의 standing controller는 raw joint/IMU feedback를 직접 사용하는 경량 bring-up 구조이며,
+state estimator 분리는 후속 milestone(M11)에서 진행한다.
+
 핵심 작업
 
 - pose tuning
