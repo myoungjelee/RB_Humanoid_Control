@@ -94,6 +94,7 @@ class StandaloneDirectWorld:
         asset_source: str,
         sim_dt: float,
         fall_watch_cfg: dict[str, Any] | None = None,
+        disturbance_cfg: dict[str, Any] | None = None,
     ):
         self.world = sim
         self.scene = scene
@@ -111,6 +112,24 @@ class StandaloneDirectWorld:
             "torso_body_name_candidates", ["torso_link", "torso", "base_link"]
         )
         self._torso_body_index, self._torso_body_name = self._resolve_body_candidate(torso_name_candidates)
+        self._disturbance_cfg = dict(disturbance_cfg or {})
+        self._disturbance_enabled = bool(self._disturbance_cfg.get("enabled", False))
+        self._disturbance_active = False
+        self._disturbance_completed = False
+        self._disturbance_start_elapsed_sec = float(self._disturbance_cfg.get("start_elapsed_sec", 5.0))
+        self._disturbance_duration_sec = float(self._disturbance_cfg.get("duration_sec", 0.2))
+        self._disturbance_end_elapsed_sec = self._disturbance_start_elapsed_sec + self._disturbance_duration_sec
+        self._disturbance_is_global = bool(self._disturbance_cfg.get("is_global", True))
+        force_xyz = self._disturbance_cfg.get("force_xyz", [0.0, 0.0, 0.0])
+        torque_xyz = self._disturbance_cfg.get("torque_xyz", [0.0, 0.0, 0.0])
+        self._disturbance_force_xyz = tuple(float(v) for v in force_xyz)
+        self._disturbance_torque_xyz = tuple(float(v) for v in torque_xyz)
+        disturbance_body_candidates = self._disturbance_cfg.get(
+            "body_name_candidates", ["torso_link", "torso", "base_link"]
+        )
+        self._disturbance_body_index, self._disturbance_body_name = self._resolve_body_candidate(
+            disturbance_body_candidates
+        )
         if self._fall_watch_enabled:
             torso_label = self._torso_body_name if self._torso_body_name is not None else "unresolved"
             print(
@@ -121,9 +140,22 @@ class StandaloneDirectWorld:
                 f"torso_body={torso_label}",
                 flush=True,
             )
+        if self._disturbance_enabled:
+            body_label = self._disturbance_body_name if self._disturbance_body_name is not None else "unresolved"
+            print(
+                "[CONFIG] disturbance enabled "
+                f"start_elapsed_sec={self._disturbance_start_elapsed_sec:.2f} "
+                f"duration_sec={self._disturbance_duration_sec:.2f} "
+                f"body={body_label} "
+                f"force_xyz={self._disturbance_force_xyz} "
+                f"torque_xyz={self._disturbance_torque_xyz} "
+                f"is_global={self._disturbance_is_global}",
+                flush=True,
+            )
 
     def step(self, *, render: bool = True) -> None:
         """physics/render step을 1회 진행한다."""
+        self._maybe_apply_disturbance()
         self.world.step(render=render)
         self.scene.update(self.sim_dt)
         self._step_count += 1
@@ -144,6 +176,60 @@ class StandaloneDirectWorld:
             flush=True,
         )
         return None, None
+
+    def _apply_disturbance_wrench(self, *, active: bool) -> None:
+        """disturbance wrench를 직접 PhysX view에 적용한다."""
+        if self._disturbance_body_index is None:
+            return
+        body_count = len(getattr(self.robot, "body_names"))
+        forces = self.robot.data.root_pos_w.new_zeros((1, body_count, 3))
+        torques = self.robot.data.root_pos_w.new_zeros((1, body_count, 3))
+        if active:
+            fx, fy, fz = self._disturbance_force_xyz
+            tx, ty, tz = self._disturbance_torque_xyz
+            forces[:, self._disturbance_body_index, 0] = fx
+            forces[:, self._disturbance_body_index, 1] = fy
+            forces[:, self._disturbance_body_index, 2] = fz
+            torques[:, self._disturbance_body_index, 0] = tx
+            torques[:, self._disturbance_body_index, 1] = ty
+            torques[:, self._disturbance_body_index, 2] = tz
+        self.robot.root_physx_view.apply_forces_and_torques_at_position(
+            force_data=forces.view(-1, 3),
+            torque_data=torques.view(-1, 3),
+            position_data=None,
+            indices=self.robot._ALL_INDICES,
+            is_global=self._disturbance_is_global,
+        )
+
+    def _maybe_apply_disturbance(self) -> None:
+        """설정된 외란을 일정 시간 창에서만 적용한다."""
+        if not self._disturbance_enabled or self._disturbance_body_index is None or self._disturbance_completed:
+            return
+        elapsed_sec = self._step_count * self.sim_dt
+        if self._disturbance_start_elapsed_sec <= elapsed_sec < self._disturbance_end_elapsed_sec:
+            if not self._disturbance_active:
+                print(
+                    "[DISTURBANCE_START] "
+                    f"elapsed_sec={elapsed_sec:.3f} "
+                    f"body={self._disturbance_body_name} "
+                    f"force_xyz={self._disturbance_force_xyz} "
+                    f"torque_xyz={self._disturbance_torque_xyz} "
+                    f"is_global={self._disturbance_is_global}",
+                    flush=True,
+                )
+                self._disturbance_active = True
+            self._apply_disturbance_wrench(active=True)
+            return
+        if self._disturbance_active:
+            self._apply_disturbance_wrench(active=False)
+            print(
+                "[DISTURBANCE_END] "
+                f"elapsed_sec={elapsed_sec:.3f} "
+                f"body={self._disturbance_body_name}",
+                flush=True,
+            )
+            self._disturbance_active = False
+            self._disturbance_completed = True
 
     def maybe_emit_fall_event(self) -> bool:
         """pelvis/torso 높이 하강을 fall event로 간주하고 한 번만 로그를 남긴다."""
@@ -446,6 +532,7 @@ def create_standalone_world(args_cli: Any, phase_cfg: dict[str, Any]):
             asset_source=asset_source,
             sim_dt=float(phase_cfg["sim_dt"]),
             fall_watch_cfg=phase_cfg.get("fall_watch"),
+            disturbance_cfg=phase_cfg.get("disturbance"),
         ),
         asset_source,
     )

@@ -23,6 +23,7 @@ from scripts.sim2real.app.phases import (
     prepare_phase_runtime,
     run_m1_sensor_phase,
     run_m3_command_phase,
+    run_m8_disturb_phase,
     run_m5_pose_audit_phase,
     run_m5_stand_phase,
 )
@@ -102,7 +103,7 @@ def run(argv: list[str] | None = None, forced_phase: str | None = None) -> int:
     phase = forced_phase or args_cli.phase or default_phase
 
     phase_cfg = get_phase_config(config, phase)
-    if phase in ("m1_sensor", "m3_command", "m5_stand", "m5_pose_audit"):
+    if phase in ("m1_sensor", "m3_command", "m5_stand", "m5_pose_audit", "m8_disturb"):
         phase_cfg = apply_m1_cli_overrides(phase_cfg, args_cli)
     else:
         raise ValueError(f"Unsupported phase: {phase}")
@@ -119,6 +120,8 @@ def run(argv: list[str] | None = None, forced_phase: str | None = None) -> int:
             result = run_m3_command_phase(args_cli, phase_cfg, simulation_app)
         elif phase == "m5_stand":
             result = run_m5_stand_phase(args_cli, phase_cfg, simulation_app)
+        elif phase == "m8_disturb":
+            result = run_m8_disturb_phase(args_cli, phase_cfg, simulation_app)
         elif phase == "m5_pose_audit":
             result = run_m5_pose_audit_phase(args_cli, phase_cfg, simulation_app)
         else:

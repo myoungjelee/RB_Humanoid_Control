@@ -4,6 +4,7 @@
 - M1(sensor publish 확인)
 - M3(command apply 확인)
 - M5(stand: /rb/command_safe 적용 확인)
+- M8(disturbance A/B 비교용 rollout)
 메인 ROS2 트랙은 standalone `World.step()` backend를 사용한다.
 """
 
@@ -174,6 +175,16 @@ def run_m3_command_phase(args_cli: Any, phase_cfg: dict[str, Any], simulation_ap
 
 def run_m5_stand_phase(args_cli: Any, phase_cfg: dict[str, Any], simulation_app: Any) -> dict[str, Any]:
     """M5 phase 실행(/rb/command_safe -> articulation 적용 확인)."""
+    return _run_rollout_phase(
+        args_cli=args_cli,
+        phase_cfg=phase_cfg,
+        simulation_app=simulation_app,
+        graph_builder=build_m3_command_graph,
+    )
+
+
+def run_m8_disturb_phase(args_cli: Any, phase_cfg: dict[str, Any], simulation_app: Any) -> dict[str, Any]:
+    """M8 phase 실행(standing + single disturbance 적용 비교)."""
     return _run_rollout_phase(
         args_cli=args_cli,
         phase_cfg=phase_cfg,

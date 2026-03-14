@@ -323,12 +323,12 @@ standing을 불필요하게 끊지 않는다.
 
 목표
 
-외란 상황에서 controller 효과를 증명한다.
+같은 외란에서 balance feedback 효과를 증명한다.
 
 구조
 
-- controller OFF
-- controller ON
+- balance feedback OFF
+- balance feedback ON
 
 같은 disturbance
 
@@ -341,6 +341,11 @@ standing을 불필요하게 끊지 않는다.
 
 - OFF → 바로 넘어짐
 - ON  → 더 오래 버팀
+
+설명
+
+이 milestone의 OFF/ON은 외란 유무가 아니라
+같은 torso push에 대해 balance feedback을 끈 경우와 켠 경우를 비교한다.
 
 ---
 

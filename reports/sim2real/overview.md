@@ -12,7 +12,7 @@ Stage1(`reports/stage1/*`)은 baseline 자산으로 유지하고, 본 문서는 
   - observer 쪽 `imu_frame_mode=g1_imu_link` 보정으로 개선
   - safety-on 기준 `CONTROL_ACTIVE` 이후 60초 no-fall / no-safety-reason 확인
 - 다음 단계:
-  - disturbance A/B 비교
+  - 같은 외란에서 balance feedback OFF/ON 비교
   - KPI 자동화
 
 ## 3) 왜 이 순서로 진행했는가
@@ -164,8 +164,8 @@ Stage1(`reports/stage1/*`)은 baseline 자산으로 유지하고, 본 문서는 
   - `fall_event.txt`에 `[NO_FALL_EVENT] capture_window_sec=60` 반복 확인
   - `60~90초` 이상 hold도 반복 관찰
 - 현재 대표 증빙:
-  - `logs/sim2real/20260314-121949_m5_stand_sanity_qrefv7/m5/fall_event.txt`
-  - `logs/sim2real/20260314-121949_m5_stand_sanity_qrefv7/m5/sync_markers.txt`
+  - `logs/sim2real/_legacy/20260314-121949_m5_stand_sanity_qrefv7/m5/fall_event.txt`
+  - `logs/sim2real/_legacy/20260314-121949_m5_stand_sanity_qrefv7/m5/sync_markers.txt`
   - `ros2_ws/src/rb_controller/config/scenarios/stand_pd_sanity.yaml`
 
 ### M6: evidence / artifact infrastructure
@@ -176,7 +176,7 @@ Stage1(`reports/stage1/*`)은 baseline 자산으로 유지하고, 본 문서는 
 - 왜 중요했나:
   - standing이나 safety 결과를 나중에 다시 설명하려면 raw log와 요약 아티팩트가 함께 있어야 하기 때문
 - 결과:
-  - `logs/sim2real/<run_id>/m5/*`, `logs/sim2real/<run_id>/m7/*` 구조 정착
+  - `logs/sim2real/m5/<run_id>/m5/*`, `logs/sim2real/m7/<run_id>/m7/*` 구조 정착
 
 ### M7: safety-on standing 재통합
 - 구현:
@@ -190,9 +190,9 @@ Stage1(`reports/stage1/*`)은 baseline 자산으로 유지하고, 본 문서는 
   - `[NO_FALL_EVENT]`
   - `[NO_SAFETY_REASON]`
 - 대표 증빙:
-  - `logs/sim2real/20260314-133954_m7_stand_safecheck/m7/fall_event.txt`
-  - `logs/sim2real/20260314-133954_m7_stand_safecheck/m7/reason_count.txt`
-  - `logs/sim2real/20260314-133954_m7_stand_safecheck/m7/sync_markers.txt`
+  - `logs/sim2real/_legacy/20260314-133954_m7_stand_safecheck/m7/fall_event.txt`
+  - `logs/sim2real/_legacy/20260314-133954_m7_stand_safecheck/m7/reason_count.txt`
+  - `logs/sim2real/_legacy/20260314-133954_m7_stand_safecheck/m7/sync_markers.txt`
 
 ## 6) 현재 standing 해석
 - 기존 문제:
@@ -212,12 +212,12 @@ Stage1(`reports/stage1/*`)은 baseline 자산으로 유지하고, 본 문서는 
 3. 포트폴리오 패키징 마감
 
 ## 8) 아티팩트 경로
-- 실행 로그: `logs/sim2real/<timestamp>/`
+- 실행 로그: `logs/sim2real/<milestone>/<run_id>/`
 - M5 대표 로그:
-  - `logs/sim2real/<run_id>/m5/fall_event.txt`
-  - `logs/sim2real/<run_id>/m5/sync_markers.txt`
-  - `logs/sim2real/<run_id>/m5/loop_post_sync.txt`
-  - `logs/sim2real/<run_id>/m5/loop_before_fall.txt`
+  - `logs/sim2real/m5/<run_id>/m5/fall_event.txt`
+  - `logs/sim2real/m5/<run_id>/m5/sync_markers.txt`
+  - `logs/sim2real/m5/<run_id>/m5/loop_post_sync.txt`
+  - `logs/sim2real/m5/<run_id>/m5/loop_before_fall.txt`
 - 요약 문서:
   - `README.md`
   - `reports/sim2real/overview.md`

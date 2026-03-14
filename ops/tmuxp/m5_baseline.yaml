@@ -2,7 +2,7 @@ session_name: rb_m5_baseline
 start_directory: /home/leemou/Projects/RB_Humanoid_Control
 shell_command_before:
   - export RUN_ID="${RUN_ID:?Set RUN_ID before tmuxp load}"
-  - export BASE="$HOME/Projects/RB_Humanoid_Control/logs/sim2real/$RUN_ID"
+  - export BASE="$HOME/Projects/RB_Humanoid_Control/logs/sim2real/m5/$RUN_ID"
   - mkdir -p "$BASE/m5"
 windows:
   - window_name: m5_baseline

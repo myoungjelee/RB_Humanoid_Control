@@ -46,7 +46,7 @@ Isaac Sim과 실기체에서 재사용 가능한 ROS2 제어 스택 인터페이
   - 현재 파라미터: `imu_frame_mode=g1_imu_link`
 - 결과:
   - controller-only no-disturbance standing hold 확보
-  - 대표 로그: `logs/sim2real/20260314-121949_m5_stand_sanity_qrefv7/m5/fall_event.txt`
+  - 대표 로그: `logs/sim2real/_legacy/20260314-121949_m5_stand_sanity_qrefv7/m5/fall_event.txt`
 
 ## M7에서 확인한 것
 - controller-only로 서는 세팅을 그대로 가져가고 safety만 다시 켰음
@@ -67,7 +67,7 @@ Isaac Sim과 실기체에서 재사용 가능한 ROS2 제어 스택 인터페이
 - M5 controller-only standing hold 확보
 - M6 증빙/아티팩트 인프라 완료
 - M7 safety-on standing 완료
-- 다음 단계: disturbance A/B -> KPI 자동화 -> 포트폴리오 패키징
+- 다음 단계: 같은 외란에서 balance feedback OFF/ON 비교 -> KPI 자동화 -> 포트폴리오 패키징
 
 ## 핵심 링크
 - 랜딩 페이지: [README.md](../../README.md)

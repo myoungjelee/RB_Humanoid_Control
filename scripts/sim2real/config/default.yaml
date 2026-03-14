@@ -147,3 +147,55 @@ sim2real:
       tick_frame_period: 0
       frame_ids:
         imu: auto
+
+  m8_disturb:
+    task: stand
+    num_envs: 1
+    steps: -1
+    stop_on_fall_event: true
+    progress_log_interval_sec: 10.0
+    disable_fabric: false
+    reset_on_done: true
+    sim_dt: 0.005
+    decimation: 1
+    substeps: 1
+    robot_usd_path: null
+    spawn_joint_seed_path: ros2_ws/src/rb_bringup/config/stand_qref_g1_seed.yaml
+    spawn_root_height_z: 0.74
+    ankle_actuator_override:
+      enabled: true
+      stiffness: 80.0
+      damping: 8.0
+      effort_limit_sim: 40.0
+    fall_watch:
+      enabled: true
+      min_elapsed_sec: 0.1
+      pelvis_z_threshold: 0.30
+      torso_z_threshold: 0.40
+      torso_body_name_candidates: [torso_link, torso, base_link]
+    disturbance:
+      enabled: true
+      start_elapsed_sec: 5.0
+      duration_sec: 0.20
+      body_name_candidates: [torso_link, torso, base_link]
+      force_xyz: [0.0, 120.0, 0.0]
+      torque_xyz: [0.0, 0.0, 0.0]
+      is_global: true
+    enable_ros2_bridge: true
+    bridge_extension: isaacsim.ros2.bridge
+    topics:
+      joint_states: /rb/joint_states
+      imu: /rb/imu
+      clock: /clock
+      command_raw: /rb/command_safe
+    graph_builder:
+      enabled: true
+      strict: true
+      graph_path: /RBM8Graph
+      robot_prim: /World/envs/env_0/Robot/pelvis
+      imu_prim: auto
+      tick_source: on_physics_step
+      tick_only_playback: false
+      tick_frame_period: 0
+      frame_ids:
+        imu: auto
