@@ -1,32 +1,33 @@
 rb_controller:
   ros__parameters:
     signal_mode: stand_pd
+    log_interval_sec: 0.2
     # M5 진입 전 무외란 기본 stand를 먼저 확보하기 위한 sanity 설정.
     stand_kp: 60.0
     stand_kd: 4.0
-    stand_effort_abs_max: 12.0
+    stand_effort_abs_max: 18.0
     stand_hold_current_on_start: false
     stand_q_ref:
       [
-        -0.02,
-        -0.02,
+        -0.20,
+        -0.20,
         0.0,
         0.0,
         0.0,
-        0.26,
-        0.26,
+        0.35,
+        0.35,
+        0.16,
+        -0.16,
         0.0,
         0.0,
+        0.42,
+        0.42,
         0.0,
         0.0,
-        0.08,
-        0.08,
-        0.0,
-        0.0,
-        -0.03,
-        -0.03,
-        0.50,
-        0.50,
+        -0.23,
+        -0.23,
+        0.87,
+        0.87,
         0.0,
         0.0,
         0.0,
@@ -68,8 +69,8 @@ rb_controller:
     stand_kd_scale_hip: 1.2
     stand_kp_scale_knee: 1.2
     stand_kd_scale_knee: 1.0
-    stand_kp_scale_ankle: 3.0
-    stand_kd_scale_ankle: 2.0
+    stand_kp_scale_ankle: 2.5
+    stand_kd_scale_ankle: 1.5
     stand_kp_scale_torso: 2.0
     stand_kd_scale_torso: 1.5
     imu_zero_on_start: true
@@ -79,12 +80,19 @@ rb_controller:
     enable_tilt_feedback: true
     # 직접 effort를 더하는 대신, nominal q_ref를 기울기 기준으로 조금씩 수정한다.
     tilt_apply_mode: qref_bias
+    # G1 imu_link raw 축을 controller pitch/roll 해석과 맞추는 observer-side 보정.
+    imu_frame_mode: g1_imu_link
     tilt_qref_bias_abs_max: 0.15
-    tilt_kp_pitch: 18.0
-    tilt_kd_pitch: 3.0
+    tilt_kp_roll: 10.0
+    tilt_kd_roll: 2.0
+    tilt_weight_roll_hip: 0.7
+    tilt_weight_roll_ankle: 0.3
+    tilt_weight_roll_torso: 0.0
+    tilt_kp_pitch: 20.0
+    tilt_kd_pitch: 2.0
     tilt_effort_abs_max: 4.0
-    tilt_weight_pitch_hip: 0.9
-    tilt_weight_pitch_ankle: 0.6
+    tilt_weight_pitch_hip: 0.8
+    tilt_weight_pitch_ankle: 0.7
     tilt_weight_pitch_knee: 0.15
     tilt_weight_pitch_torso: 0.05
     limit_avoid_enable: true

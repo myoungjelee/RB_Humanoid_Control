@@ -9,6 +9,7 @@
 
 from __future__ import annotations
 
+import math
 import os
 from pathlib import Path
 from typing import Any
@@ -85,14 +86,106 @@ def create_env(args_cli: Any, phase_cfg: dict[str, Any]):
 class StandaloneDirectWorld:
     """IsaacLab direct spawn 기반 standalone simulation 래퍼."""
 
-    def __init__(self, sim: Any, scene: Any, asset_source: str):
+    def __init__(
+        self,
+        sim: Any,
+        scene: Any,
+        robot: Any,
+        asset_source: str,
+        sim_dt: float,
+        fall_watch_cfg: dict[str, Any] | None = None,
+    ):
         self.world = sim
         self.scene = scene
+        self.robot = robot
         self.asset_source = asset_source
+        self.sim_dt = float(sim_dt)
+        self._step_count = 0
+        self._fall_watch_cfg = dict(fall_watch_cfg or {})
+        self._fall_watch_enabled = bool(self._fall_watch_cfg.get("enabled", False))
+        self._fall_event_emitted = False
+        self._fall_watch_min_elapsed_sec = float(self._fall_watch_cfg.get("min_elapsed_sec", 0.5))
+        self._fall_watch_pelvis_z_threshold = float(self._fall_watch_cfg.get("pelvis_z_threshold", 0.45))
+        self._fall_watch_torso_z_threshold = float(self._fall_watch_cfg.get("torso_z_threshold", 0.58))
+        torso_name_candidates = self._fall_watch_cfg.get(
+            "torso_body_name_candidates", ["torso_link", "torso", "base_link"]
+        )
+        self._torso_body_index, self._torso_body_name = self._resolve_body_candidate(torso_name_candidates)
+        if self._fall_watch_enabled:
+            torso_label = self._torso_body_name if self._torso_body_name is not None else "unresolved"
+            print(
+                "[CONFIG] fall_watch enabled "
+                f"min_elapsed_sec={self._fall_watch_min_elapsed_sec:.2f} "
+                f"pelvis_z_threshold={self._fall_watch_pelvis_z_threshold:.3f} "
+                f"torso_z_threshold={self._fall_watch_torso_z_threshold:.3f} "
+                f"torso_body={torso_label}",
+                flush=True,
+            )
 
     def step(self, *, render: bool = True) -> None:
         """physics/render step을 1회 진행한다."""
         self.world.step(render=render)
+        self.scene.update(self.sim_dt)
+        self._step_count += 1
+
+    def _resolve_body_candidate(self, name_candidates: Any) -> tuple[int | None, str | None]:
+        if not name_candidates:
+            return None, None
+        if isinstance(name_candidates, str):
+            candidate_list = [name_candidates]
+        else:
+            candidate_list = [str(name) for name in name_candidates]
+        for candidate in candidate_list:
+            body_ids, body_names = self.robot.find_bodies(candidate, preserve_order=True)
+            if body_ids:
+                return int(body_ids[0]), str(body_names[0])
+        print(
+            f"[WARN] fall_watch body candidates not found: {candidate_list}",
+            flush=True,
+        )
+        return None, None
+
+    def maybe_emit_fall_event(self) -> bool:
+        """pelvis/torso 높이 하강을 fall event로 간주하고 한 번만 로그를 남긴다."""
+        if not self._fall_watch_enabled or self._fall_event_emitted:
+            return False
+        elapsed_sec = self._step_count * self.sim_dt
+        if elapsed_sec < self._fall_watch_min_elapsed_sec:
+            return False
+
+        env_origin_z = 0.0
+        env_origins = getattr(self.scene, "env_origins", None)
+        if env_origins is not None:
+            env_origin_z = float(env_origins[0, 2].item())
+
+        pelvis_z = float(self.robot.data.root_pos_w[0, 2].item()) - env_origin_z
+        torso_z = math.nan
+        if self._torso_body_index is not None:
+            torso_z = float(self.robot.data.body_pos_w[0, self._torso_body_index, 2].item()) - env_origin_z
+
+        pelvis_trigger = pelvis_z <= self._fall_watch_pelvis_z_threshold
+        torso_trigger = not math.isnan(torso_z) and torso_z <= self._fall_watch_torso_z_threshold
+        if not pelvis_trigger and not torso_trigger:
+            return False
+
+        trigger_parts: list[str] = []
+        if pelvis_trigger:
+            trigger_parts.append("pelvis")
+        if torso_trigger:
+            torso_name = self._torso_body_name or "torso"
+            trigger_parts.append(f"torso:{torso_name}")
+
+        torso_z_text = "nan" if math.isnan(torso_z) else f"{torso_z:.3f}"
+        print(
+            "[FALL_EVENT] "
+            f"elapsed_sec={elapsed_sec:.3f} "
+            f"trigger={'+'.join(trigger_parts)} "
+            f"pelvis_z={pelvis_z:.3f}/{self._fall_watch_pelvis_z_threshold:.3f} "
+            f"torso_z={torso_z_text}/{self._fall_watch_torso_z_threshold:.3f}",
+            flush=True,
+        )
+        self._fall_event_emitted = True
+        return True
 
     def close(self) -> None:
         """명시적으로 정리할 리소스가 있으면 정리한다."""
@@ -150,6 +243,18 @@ def _resolve_pose_audit_arm_stiffness(phase_cfg: dict[str, Any]) -> float:
 def _resolve_pose_audit_arm_damping(phase_cfg: dict[str, Any]) -> float:
     """pose audit arm actuator damping override를 읽는다."""
     return float(phase_cfg.get("pose_audit_arm_damping", 1.5))
+
+
+def _resolve_ankle_actuator_override(phase_cfg: dict[str, Any]) -> dict[str, float] | None:
+    """stand 실험에서 ankle actuator override 설정을 읽는다."""
+    raw_cfg = phase_cfg.get("ankle_actuator_override")
+    if not isinstance(raw_cfg, dict) or not bool(raw_cfg.get("enabled", False)):
+        return None
+    return {
+        "stiffness": float(raw_cfg.get("stiffness", 40.0)),
+        "damping": float(raw_cfg.get("damping", 4.0)),
+        "effort_limit_sim": float(raw_cfg.get("effort_limit_sim", 40.0)),
+    }
 
 
 def _load_named_joint_seed_values(seed_path: str) -> dict[str, float]:
@@ -232,6 +337,20 @@ def _build_direct_g1_scene_cfg(phase_cfg: dict[str, Any]) -> tuple[Any, str]:
             print(
                 "[CONFIG] pose_audit_relax_arms=true "
                 f"stiffness={arms_actuator.stiffness} damping={arms_actuator.damping}",
+                flush=True,
+            )
+    ankle_override = _resolve_ankle_actuator_override(phase_cfg)
+    if ankle_override is not None:
+        feet_actuator = robot_cfg.actuators.get("feet")
+        if feet_actuator is not None:
+            feet_actuator.stiffness = ankle_override["stiffness"]
+            feet_actuator.damping = ankle_override["damping"]
+            feet_actuator.effort_limit_sim = ankle_override["effort_limit_sim"]
+            print(
+                "[CONFIG] ankle_actuator_override enabled "
+                f"stiffness={feet_actuator.stiffness} "
+                f"damping={feet_actuator.damping} "
+                f"effort_limit_sim={feet_actuator.effort_limit_sim}",
                 flush=True,
             )
     spawn_seed_path = _resolve_spawn_joint_seed_path(phase_cfg)
@@ -318,4 +437,15 @@ def create_standalone_world(args_cli: Any, phase_cfg: dict[str, Any]):
             dump_path=startup_dump_path,
         )
 
-    return task_id, StandaloneDirectWorld(sim=sim, scene=scene, asset_source=asset_source), asset_source
+    return (
+        task_id,
+        StandaloneDirectWorld(
+            sim=sim,
+            scene=scene,
+            robot=robot,
+            asset_source=asset_source,
+            sim_dt=float(phase_cfg["sim_dt"]),
+            fall_watch_cfg=phase_cfg.get("fall_watch"),
+        ),
+        asset_source,
+    )

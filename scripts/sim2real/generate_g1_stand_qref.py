@@ -14,14 +14,14 @@ DEFAULT_OUTPUT = PROJECT_ROOT / "ros2_ws" / "src" / "rb_bringup" / "config" / "s
 
 
 SEED_RULES: list[tuple[str, float]] = [
-    (".*_hip_pitch_joint", -0.02),
-    (".*_knee_joint", 0.08),
-    (".*_ankle_pitch_joint", -0.03),
-    (".*_elbow_pitch_joint", 0.50),
-    ("left_shoulder_roll_joint", 0.00),
-    ("left_shoulder_pitch_joint", 0.26),
-    ("right_shoulder_roll_joint", 0.00),
-    ("right_shoulder_pitch_joint", 0.26),
+    (".*_hip_pitch_joint", -0.20),
+    (".*_knee_joint", 0.42),
+    (".*_ankle_pitch_joint", -0.23),
+    (".*_elbow_pitch_joint", 0.87),
+    ("left_shoulder_roll_joint", 0.16),
+    ("left_shoulder_pitch_joint", 0.35),
+    ("right_shoulder_roll_joint", -0.16),
+    ("right_shoulder_pitch_joint", 0.35),
     ("left_one_joint", 1.0),
     ("right_one_joint", -1.0),
     ("left_two_joint", 0.52),

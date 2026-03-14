@@ -37,9 +37,12 @@ public:
     safe_mode_action_ = this->declare_parameter<std::string>("safe_mode_action", "zero_effort");
     effort_abs_max_default_ = this->declare_parameter<double>("effort_abs_max_default", 8.0);
     joint_limit_margin_rad_ = this->declare_parameter<double>("joint_limit_margin_rad", 0.05);
-    input_timeout_sec_ = this->declare_parameter<double>("input_timeout_sec", 0.15);
-    tilt_limit_roll_rad_ = this->declare_parameter<double>("tilt_limit_roll_rad", 0.35);
-    tilt_limit_pitch_rad_ = this->declare_parameter<double>("tilt_limit_pitch_rad", 0.35);
+    input_timeout_sec_ = this->declare_parameter<double>("input_timeout_sec", 0.3);
+    tilt_limit_roll_rad_ = this->declare_parameter<double>("tilt_limit_roll_rad", 0.6);
+    tilt_limit_pitch_rad_ = this->declare_parameter<double>("tilt_limit_pitch_rad", 0.6);
+    velocity_limit_default_rad_s_ = this->declare_parameter<double>("velocity_limit_default_rad_s", 8.0);
+    velocity_limit_ankle_rad_s_ = this->declare_parameter<double>("velocity_limit_ankle_rad_s", 12.0);
+    watchdog_rate_hz_ = this->declare_parameter<double>("watchdog_rate_hz", 100.0);
     joint_limit_debug_log_ = this->declare_parameter<bool>("joint_limit_debug_log", true);
     // TILT 원인 분석용 상세 로그 on/off
     tilt_debug_log_ = this->declare_parameter<bool>("tilt_debug_log", true);
@@ -64,6 +67,18 @@ public:
     {
       tilt_limit_pitch_rad_ = 0.0;
     }
+    if (velocity_limit_default_rad_s_ < 0.0)
+    {
+      velocity_limit_default_rad_s_ = 0.0;
+    }
+    if (velocity_limit_ankle_rad_s_ < 0.0)
+    {
+      velocity_limit_ankle_rad_s_ = 0.0;
+    }
+    if (watchdog_rate_hz_ <= 0.0)
+    {
+      watchdog_rate_hz_ = 100.0;
+    }
 
     command_pub_ = this->create_publisher<sensor_msgs::msg::JointState>(
         output_command_topic_, 10);
@@ -76,6 +91,10 @@ public:
     imu_sub_ = this->create_subscription<sensor_msgs::msg::Imu>(
         imu_topic_, 10,
         std::bind(&RbSafetyNode::on_imu, this, std::placeholders::_1));
+    watchdog_timer_ = this->create_wall_timer(
+        std::chrono::duration_cast<std::chrono::nanoseconds>(
+            std::chrono::duration<double>(1.0 / watchdog_rate_hz_)),
+        std::bind(&RbSafetyNode::on_watchdog_timer, this));
 
     // safety.yaml의 joint_limits.* 파라미터를 로딩한다.
     load_joint_limits_from_overrides();
@@ -86,10 +105,11 @@ public:
 
     RCLCPP_INFO(
         this->get_logger(),
-        "rb_safety started: in=%s out=%s js=%s imu=%s safety=%s imu_zero_on_start=%s limits=%zu",
+        "rb_safety started: in=%s out=%s js=%s imu=%s safety=%s imu_zero_on_start=%s limits=%zu timeout=%.3fs vel_limit(default/ankle)=%.3f/%.3f watchdog=%.1fHz",
         input_command_topic_.c_str(), output_command_topic_.c_str(),
         input_joint_states_topic_.c_str(), imu_topic_.c_str(),
-        (safety_enabled_ ? "on" : "off"), imu_zero_on_start_ ? "on" : "off", joint_limits_.size());
+        (safety_enabled_ ? "on" : "off"), imu_zero_on_start_ ? "on" : "off", joint_limits_.size(),
+        input_timeout_sec_, velocity_limit_default_rad_s_, velocity_limit_ankle_rad_s_, watchdog_rate_hz_);
   }
 
 private:
@@ -99,7 +119,8 @@ private:
     CLAMP = 1,
     JOINT_LIMIT = 2,
     TIMEOUT = 3,
-    TILT = 4
+    TILT = 4,
+    VELOCITY_LIMIT = 5
   };
 
   struct JointLimitBound
@@ -122,6 +143,14 @@ private:
     double soft_upper{0.0};
     double hard_lower{0.0};
     double hard_upper{0.0};
+  };
+
+  struct VelocityLimitDebugInfo
+  {
+    bool valid{false};
+    std::string joint_name{};
+    double velocity_rad_s{0.0};
+    double limit_rad_s{0.0};
   };
 
   /**
@@ -158,6 +187,12 @@ private:
       {
         safety_enabled_ = param.as_bool();
         continue;
+      }
+      if (name == "watchdog_rate_hz")
+      {
+        result.successful = false;
+        result.reason = "runtime update not supported for watchdog_rate_hz (restart required)";
+        return result;
       }
       if (name == "imu_zero_on_start")
       {
@@ -239,6 +274,30 @@ private:
         tilt_limit_pitch_rad_ = v;
         continue;
       }
+      if (name == "velocity_limit_default_rad_s")
+      {
+        const double v = param.as_double();
+        if (v < 0.0)
+        {
+          result.successful = false;
+          result.reason = "velocity_limit_default_rad_s must be >= 0";
+          return result;
+        }
+        velocity_limit_default_rad_s_ = v;
+        continue;
+      }
+      if (name == "velocity_limit_ankle_rad_s")
+      {
+        const double v = param.as_double();
+        if (v < 0.0)
+        {
+          result.successful = false;
+          result.reason = "velocity_limit_ankle_rad_s must be >= 0";
+          return result;
+        }
+        velocity_limit_ankle_rad_s_ = v;
+        continue;
+      }
       if (name == "joint_limit_debug_log")
       {
         joint_limit_debug_log_ = param.as_bool();
@@ -253,7 +312,7 @@ private:
 
     RCLCPP_INFO(
         this->get_logger(),
-        "runtime safety parameters updated: safety=%s safe_mode=%s imu_zero=%s effort_max=%.3f margin=%.4f timeout=%.3f tilt_limit=[%.3f,%.3f] debug(joint/tilt)=%s/%s",
+        "runtime safety parameters updated: safety=%s safe_mode=%s imu_zero=%s effort_max=%.3f margin=%.4f timeout=%.3f tilt_limit=[%.3f,%.3f] vel_limit(default/ankle)=%.3f/%.3f debug(joint/tilt)=%s/%s",
         safety_enabled_ ? "on" : "off",
         safe_mode_action_.c_str(),
         imu_zero_on_start_ ? "on" : "off",
@@ -262,6 +321,8 @@ private:
         input_timeout_sec_,
         tilt_limit_roll_rad_,
         tilt_limit_pitch_rad_,
+        velocity_limit_default_rad_s_,
+        velocity_limit_ankle_rad_s_,
         joint_limit_debug_log_ ? "on" : "off",
         tilt_debug_log_ ? "on" : "off");
     return result;
@@ -279,6 +340,9 @@ private:
 
     sensor_msgs::msg::JointState out = *msg;
     const auto now_steady = std::chrono::steady_clock::now();
+    latest_raw_command_ = out;
+    latest_command_received_ = true;
+    latest_command_time_steady_ = now_steady;
     apply_safety_filters(out, now_steady);
     command_pub_->publish(out);
   }
@@ -294,10 +358,17 @@ private:
     }
 
     latest_joint_positions_.clear();
+    latest_joint_velocities_.clear();
+    latest_joint_names_ = msg->name;
     const std::size_t position_count = std::min(msg->name.size(), msg->position.size());
     for (std::size_t i = 0; i < position_count; ++i)
     {
       latest_joint_positions_[msg->name[i]] = msg->position[i];
+    }
+    const std::size_t velocity_count = std::min(msg->name.size(), msg->velocity.size());
+    for (std::size_t i = 0; i < velocity_count; ++i)
+    {
+      latest_joint_velocities_[msg->name[i]] = msg->velocity[i];
     }
     latest_joint_state_received_ = true;
     latest_joint_state_time_steady_ = std::chrono::steady_clock::now();
@@ -346,9 +417,39 @@ private:
   }
 
   /**
+   * @brief command 입력이 끊겼을 때도 주기적으로 safe command를 퍼블리시한다.
+   */
+  void on_watchdog_timer()
+  {
+    if (!safety_enabled_)
+    {
+      return;
+    }
+
+    const auto now_steady = std::chrono::steady_clock::now();
+    if (!is_input_timeout(now_steady))
+    {
+      return;
+    }
+
+    sensor_msgs::msg::JointState safe_cmd = latest_command_received_
+        ? latest_raw_command_
+        : build_zero_command_template();
+    if (safe_cmd.name.empty() && safe_cmd.effort.empty())
+    {
+      set_safety_reason(SafetyReason::TIMEOUT);
+      return;
+    }
+
+    force_safe_action(safe_cmd);
+    command_pub_->publish(safe_cmd);
+    set_safety_reason(SafetyReason::TIMEOUT);
+  }
+
+  /**
    * @brief 안전 필터 체인을 적용해 최종 제어 명령을 보호한다.
    *
-   * 우선순위: TILT > TIMEOUT > JOINT_LIMIT > CLAMP > NORMAL
+   * 우선순위: TILT > TIMEOUT > VELOCITY_LIMIT > JOINT_LIMIT > CLAMP > NORMAL
    */
   void apply_safety_filters(
       sensor_msgs::msg::JointState &cmd_msg,
@@ -363,6 +464,7 @@ private:
     const bool clamp_active = apply_effort_clamp(cmd_msg);
     const bool joint_limit_active = apply_joint_limit_guard(cmd_msg);
     const bool timeout_active = is_input_timeout(now_steady);
+    const bool velocity_limit_active = is_velocity_exceeded();
     const bool tilt_active = is_tilt_exceeded();
 
     SafetyReason reason = SafetyReason::NORMAL;
@@ -374,6 +476,11 @@ private:
     else if (timeout_active)
     {
       reason = SafetyReason::TIMEOUT;
+      force_safe_action(cmd_msg);
+    }
+    else if (velocity_limit_active)
+    {
+      reason = SafetyReason::VELOCITY_LIMIT;
       force_safe_action(cmd_msg);
     }
     else if (joint_limit_active)
@@ -517,7 +624,7 @@ private:
   }
 
   /**
-   * @brief 입력 신선도(현재는 /rb/joint_states)를 기준으로 timeout 여부를 판단한다.
+   * @brief 최근 command_raw 수신 시각을 기준으로 timeout 여부를 판단한다.
    */
   bool is_input_timeout(const std::chrono::steady_clock::time_point &now_steady) const
   {
@@ -526,15 +633,63 @@ private:
       return false;
     }
 
-    if (!latest_joint_state_received_)
+    if (!latest_command_received_)
     {
       const double startup_elapsed = std::chrono::duration<double>(now_steady - node_start_steady_).count();
       return startup_elapsed > input_timeout_sec_;
     }
 
-    const double input_stale_sec =
-        std::chrono::duration<double>(now_steady - latest_joint_state_time_steady_).count();
-    return input_stale_sec > input_timeout_sec_;
+    const double command_stale_sec =
+        std::chrono::duration<double>(now_steady - latest_command_time_steady_).count();
+    return command_stale_sec > input_timeout_sec_;
+  }
+
+  /**
+   * @brief 관절 속도가 허용 한계를 넘었는지 판단한다.
+   */
+  bool is_velocity_exceeded()
+  {
+    if (velocity_limit_default_rad_s_ <= 0.0 && velocity_limit_ankle_rad_s_ <= 0.0)
+    {
+      return false;
+    }
+    if (latest_joint_velocities_.empty())
+    {
+      return false;
+    }
+
+    velocity_limit_debug_info_.valid = false;
+    std::size_t hit_count = 0;
+    for (const auto &kv : latest_joint_velocities_)
+    {
+      const double limit = velocity_limit_for_joint(kv.first);
+      if (limit <= 0.0)
+      {
+        continue;
+      }
+      const double abs_velocity = std::abs(kv.second);
+      if (abs_velocity <= limit)
+      {
+        continue;
+      }
+
+      ++hit_count;
+      if (!velocity_limit_debug_info_.valid)
+      {
+        velocity_limit_debug_info_.valid = true;
+        velocity_limit_debug_info_.joint_name = kv.first;
+        velocity_limit_debug_info_.velocity_rad_s = kv.second;
+        velocity_limit_debug_info_.limit_rad_s = limit;
+      }
+    }
+
+    if (hit_count > 0U)
+    {
+      velocity_limit_hit_total_ += hit_count;
+      velocity_limit_hit_window_ += hit_count;
+      return true;
+    }
+    return false;
   }
 
   /**
@@ -595,6 +750,11 @@ private:
       ++timeout_event_total_;
       ++timeout_event_window_;
     }
+    else if (reason == SafetyReason::VELOCITY_LIMIT)
+    {
+      ++velocity_limit_event_total_;
+      ++velocity_limit_event_window_;
+    }
     else if (reason == SafetyReason::TILT)
     {
       ++tilt_event_total_;
@@ -622,6 +782,27 @@ private:
             joint_limit_debug_info_.soft_upper,
             joint_limit_debug_info_.hard_lower,
             joint_limit_debug_info_.hard_upper);
+      }
+      else if (reason == SafetyReason::TIMEOUT)
+      {
+        const double command_age_sec = latest_command_received_
+            ? std::chrono::duration<double>(std::chrono::steady_clock::now() - latest_command_time_steady_).count()
+            : -1.0;
+        RCLCPP_WARN(
+            this->get_logger(),
+            "safety active: reason=TIMEOUT command_age=%.3fs limit=%.3fs command_received=%s",
+            command_age_sec,
+            input_timeout_sec_,
+            latest_command_received_ ? "yes" : "no");
+      }
+      else if (reason == SafetyReason::VELOCITY_LIMIT && velocity_limit_debug_info_.valid)
+      {
+        RCLCPP_WARN(
+            this->get_logger(),
+            "safety active: reason=VELOCITY_LIMIT joint=%s velocity=%.3f limit=%.3f",
+            velocity_limit_debug_info_.joint_name.c_str(),
+            velocity_limit_debug_info_.velocity_rad_s,
+            velocity_limit_debug_info_.limit_rad_s);
       }
       else if (reason == SafetyReason::TILT && tilt_debug_log_)
       {
@@ -671,6 +852,8 @@ private:
         return "JOINT_LIMIT";
       case SafetyReason::TIMEOUT:
         return "TIMEOUT";
+      case SafetyReason::VELOCITY_LIMIT:
+        return "VELOCITY_LIMIT";
       case SafetyReason::TILT:
         return "TILT";
       case SafetyReason::NORMAL:
@@ -773,6 +956,26 @@ private:
     }
   }
 
+  double velocity_limit_for_joint(const std::string &joint_name) const
+  {
+    if (joint_name.find("ankle") != std::string::npos)
+    {
+      return velocity_limit_ankle_rad_s_;
+    }
+    return velocity_limit_default_rad_s_;
+  }
+
+  sensor_msgs::msg::JointState build_zero_command_template() const
+  {
+    sensor_msgs::msg::JointState msg;
+    if (!latest_joint_names_.empty())
+    {
+      msg.name = latest_joint_names_;
+      msg.effort.assign(latest_joint_names_.size(), 0.0);
+    }
+    return msg;
+  }
+
   static double normalize_angle_rad(const double angle_rad)
   {
     return std::atan2(std::sin(angle_rad), std::cos(angle_rad));
@@ -787,30 +990,42 @@ private:
   std::string safe_mode_action_{"zero_effort"};
   double effort_abs_max_default_{8.0};
   double joint_limit_margin_rad_{0.05};
-  double input_timeout_sec_{0.15};
-  double tilt_limit_roll_rad_{0.35};
-  double tilt_limit_pitch_rad_{0.35};
+  double input_timeout_sec_{0.3};
+  double tilt_limit_roll_rad_{0.6};
+  double tilt_limit_pitch_rad_{0.6};
+  double velocity_limit_default_rad_s_{8.0};
+  double velocity_limit_ankle_rad_s_{12.0};
+  double watchdog_rate_hz_{100.0};
   bool joint_limit_debug_log_{true};
   bool tilt_debug_log_{true};
 
   std::unordered_map<std::string, double> latest_joint_positions_;
+  std::unordered_map<std::string, double> latest_joint_velocities_;
   std::unordered_map<std::string, JointLimitBound> joint_limits_;
   JointLimitDebugInfo joint_limit_debug_info_;
+  VelocityLimitDebugInfo velocity_limit_debug_info_;
+  std::vector<std::string> latest_joint_names_;
 
   std::size_t clamp_hit_total_{0};
   std::size_t clamp_hit_window_{0};
   std::size_t joint_limit_hit_total_{0};
   std::size_t joint_limit_hit_window_{0};
+  std::size_t velocity_limit_hit_total_{0};
+  std::size_t velocity_limit_hit_window_{0};
   std::size_t timeout_event_total_{0};
   std::size_t timeout_event_window_{0};
+  std::size_t velocity_limit_event_total_{0};
+  std::size_t velocity_limit_event_window_{0};
   std::size_t tilt_event_total_{0};
   std::size_t tilt_event_window_{0};
   SafetyReason last_safety_reason_{SafetyReason::NORMAL};
 
   std::chrono::steady_clock::time_point node_start_steady_;
+  std::chrono::steady_clock::time_point latest_command_time_steady_;
   std::chrono::steady_clock::time_point latest_joint_state_time_steady_;
   std::chrono::steady_clock::time_point latest_imu_time_steady_;
 
+  bool latest_command_received_{false};
   bool latest_joint_state_received_{false};
   bool latest_imu_received_{false};
   bool imu_zero_on_start_{false};
@@ -819,11 +1034,13 @@ private:
   double latest_pitch_rad_{0.0};
   double imu_roll_bias_rad_{0.0};
   double imu_pitch_bias_rad_{0.0};
+  sensor_msgs::msg::JointState latest_raw_command_;
 
   rclcpp::Publisher<sensor_msgs::msg::JointState>::SharedPtr command_pub_;
   rclcpp::Subscription<sensor_msgs::msg::JointState>::SharedPtr command_sub_;
   rclcpp::Subscription<sensor_msgs::msg::JointState>::SharedPtr joint_state_sub_;
   rclcpp::Subscription<sensor_msgs::msg::Imu>::SharedPtr imu_sub_;
+  rclcpp::TimerBase::SharedPtr watchdog_timer_;
   OnSetParametersCallbackHandle::SharedPtr param_callback_handle_;
 };
 

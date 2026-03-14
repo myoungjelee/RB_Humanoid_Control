@@ -66,6 +66,7 @@ sim2real:
     task: stand
     num_envs: 1
     steps: -1
+    stop_on_fall_event: true
     progress_log_interval_sec: 10.0
     disable_fabric: false
     # M5 기본 실행은 넘어지면 자동 리셋해 반복 관측한다.
@@ -75,7 +76,18 @@ sim2real:
     substeps: 1
     robot_usd_path: null
     spawn_joint_seed_path: ros2_ws/src/rb_bringup/config/stand_qref_g1_seed.yaml
-    spawn_root_height_z: 0.78
+    spawn_root_height_z: 0.74
+    ankle_actuator_override:
+      enabled: true
+      stiffness: 80.0
+      damping: 8.0
+      effort_limit_sim: 40.0
+    fall_watch:
+      enabled: true
+      min_elapsed_sec: 0.1
+      pelvis_z_threshold: 0.30
+      torso_z_threshold: 0.40
+      torso_body_name_candidates: [torso_link, torso, base_link]
     enable_ros2_bridge: true
     bridge_extension: isaacsim.ros2.bridge
     topics:
@@ -107,12 +119,16 @@ sim2real:
     substeps: 1
     robot_usd_path: null
     spawn_joint_seed_path: ros2_ws/src/rb_bringup/config/stand_qref_g1_seed.yaml
-    spawn_root_height_z: 0.78
+    spawn_root_height_z: 0.74
+    ankle_actuator_override:
+      enabled: false
     pose_audit_relax_arms: true
     pose_audit_arm_stiffness: 8.0
     pose_audit_arm_damping: 1.5
     startup_joint_dump_path: m5/startup_joint_pos.yaml
     start_paused: true
+    fall_watch:
+      enabled: false
     enable_ros2_bridge: false
     bridge_extension: isaacsim.ros2.bridge
     topics:

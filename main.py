@@ -130,7 +130,7 @@ def run(argv: list[str] | None = None, forced_phase: str | None = None) -> int:
         print(f"[RESULT] graph_built={result.get('graph_built')}", flush=True)
         print(f"[RESULT] graph_note={result.get('graph_note')}", flush=True)
         status = str(result.get("status", "failed"))
-        exit_code = 0 if status in ("completed_target_steps", "stopped_early", "stopped_no_step_limit") else 1
+        exit_code = 0 if status in ("completed_target_steps", "stopped_early", "stopped_no_step_limit", "stopped_on_fall_event") else 1
     except Exception as exc:
         print(f"[ERROR] exception: {type(exc).__name__}: {exc}", flush=True)
         print(traceback.format_exc(), flush=True)

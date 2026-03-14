@@ -82,6 +82,8 @@ def _run_rollout_phase(
         t0 = time.time()
         target_steps = int(phase_cfg.get("steps", -1))
         infinite_steps = target_steps <= 0
+        stop_on_fall_event = bool(phase_cfg.get("stop_on_fall_event", False))
+        fall_event_triggered = False
         progress_log_interval_sec = float(phase_cfg.get("progress_log_interval_sec", 10.0))
         if progress_log_interval_sec < 0.0:
             progress_log_interval_sec = 10.0
@@ -108,6 +110,17 @@ def _run_rollout_phase(
             while simulation_app.is_running() and (infinite_steps or executed_steps < target_steps):
                 world.step(render=True)
                 executed_steps += 1
+                if executed_steps == 1:
+                    print(
+                        f"[SYNC] FIRST_SIM_STEP sim_elapsed_sec={executed_steps * world.sim_dt:.3f}",
+                        flush=True,
+                    )
+                maybe_emit_fall_event = getattr(world, "maybe_emit_fall_event", None)
+                if callable(maybe_emit_fall_event):
+                    fall_event_triggered = bool(maybe_emit_fall_event()) or fall_event_triggered
+                    if fall_event_triggered and stop_on_fall_event:
+                        print("[RUNNING] stop_on_fall_event=true -> stopping rollout", flush=True)
+                        break
                 now_sec = time.time()
                 if progress_log_interval_sec > 0.0 and (now_sec - last_progress_log_sec) >= progress_log_interval_sec:
                     print(
@@ -119,6 +132,8 @@ def _run_rollout_phase(
         elapsed_sec = time.time() - t0
         if start_paused:
             status = "stopped_gui_closed"
+        elif fall_event_triggered and stop_on_fall_event:
+            status = "stopped_on_fall_event"
         elif infinite_steps:
             status = "stopped_no_step_limit"
         else:

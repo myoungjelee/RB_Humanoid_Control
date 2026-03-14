@@ -16,6 +16,29 @@
 #include "rcl_interfaces/msg/set_parameters_result.hpp"
 #include "sensor_msgs/msg/imu.hpp"
 #include "sensor_msgs/msg/joint_state.hpp"
+#include "controller_debug_logger.hpp"
+#include "controller_tilt_observer.hpp"
+#include "controller_types.hpp"
+
+namespace rbci = rb_controller::internal;
+
+namespace
+{
+
+std::string resolve_imu_frame_mode(const std::string &mode)
+{
+  if (mode == "identity" || mode == "standard")
+  {
+    return "identity";
+  }
+  if (mode == "g1_imu_link" || mode == "swap_rp")
+  {
+    return "g1_imu_link";
+  }
+  return "";
+}
+
+}  // namespace
 
 // 200Hz 제어 루프 타이밍을 측정하고, 테스트/스탠드 명령(/rb/command_raw)을 퍼블리시하는 노드
 class RbControllerNode : public rclcpp::Node
@@ -99,6 +122,9 @@ public:
     tilt_kd_pitch_ = this->declare_parameter<double>("tilt_kd_pitch", 2.5);
     tilt_deadband_rad_ = this->declare_parameter<double>("tilt_deadband_rad", 0.03);
     tilt_apply_mode_ = this->declare_parameter<std::string>("tilt_apply_mode", "effort");
+    imu_frame_mode_ = this->declare_parameter<std::string>("imu_frame_mode", "identity");
+    const auto legacy_tilt_axis_mode =
+        this->declare_parameter<std::string>("tilt_axis_mode", "");
     tilt_effort_abs_max_ = this->declare_parameter<double>("tilt_effort_abs_max", 1.8);
     tilt_qref_bias_abs_max_ = this->declare_parameter<double>("tilt_qref_bias_abs_max", 0.20);
     tilt_roll_sign_ = this->declare_parameter<double>("tilt_roll_sign", 1.0);
@@ -220,6 +246,45 @@ public:
           tilt_apply_mode_.c_str());
       tilt_apply_mode_ = "effort";
     }
+    const std::string resolved_imu_frame_mode = resolve_imu_frame_mode(imu_frame_mode_);
+    if (resolved_imu_frame_mode.empty())
+    {
+      RCLCPP_WARN(
+          this->get_logger(),
+          "unknown imu_frame_mode '%s'. fallback to identity",
+          imu_frame_mode_.c_str());
+      imu_frame_mode_ = "identity";
+    }
+    else
+    {
+      imu_frame_mode_ = resolved_imu_frame_mode;
+    }
+    if (!legacy_tilt_axis_mode.empty())
+    {
+      const std::string resolved_legacy_mode = resolve_imu_frame_mode(legacy_tilt_axis_mode);
+      if (resolved_legacy_mode.empty())
+      {
+        RCLCPP_WARN(
+            this->get_logger(),
+            "deprecated tilt_axis_mode '%s' is unknown. ignore and keep imu_frame_mode=%s",
+            legacy_tilt_axis_mode.c_str(), imu_frame_mode_.c_str());
+      }
+      else if (imu_frame_mode_ == "identity")
+      {
+        RCLCPP_WARN(
+            this->get_logger(),
+            "deprecated tilt_axis_mode is set. use imu_frame_mode instead. mapped '%s' -> '%s'",
+            legacy_tilt_axis_mode.c_str(), resolved_legacy_mode.c_str());
+        imu_frame_mode_ = resolved_legacy_mode;
+      }
+      else if (resolved_legacy_mode != imu_frame_mode_)
+      {
+        RCLCPP_WARN(
+            this->get_logger(),
+            "imu_frame_mode=%s and deprecated tilt_axis_mode=%s disagree. prefer imu_frame_mode",
+            imu_frame_mode_.c_str(), legacy_tilt_axis_mode.c_str());
+      }
+    }
     tilt_weight_roll_hip_ = std::max(0.0, tilt_weight_roll_hip_);
     tilt_weight_roll_ankle_ = std::max(0.0, tilt_weight_roll_ankle_);
     tilt_weight_roll_torso_ = std::max(0.0, tilt_weight_roll_torso_);
@@ -227,6 +292,8 @@ public:
     tilt_weight_pitch_ankle_ = std::max(0.0, tilt_weight_pitch_ankle_);
     tilt_weight_pitch_knee_ = std::max(0.0, tilt_weight_pitch_knee_);
     tilt_weight_pitch_torso_ = std::max(0.0, tilt_weight_pitch_torso_);
+    tilt_observer_.set_zero_on_start(imu_zero_on_start_);
+    tilt_observer_.set_frame_mode(imu_frame_mode_);
     // 200Hz 기준 expected dt = 0.005s
     expected_dt_sec_ = 1.0 / control_rate_hz_;
 
@@ -276,8 +343,8 @@ public:
         stand_kd_scale_hip_, stand_kd_scale_knee_, stand_kd_scale_ankle_, stand_kd_scale_torso_, stand_kd_scale_other_);
     RCLCPP_INFO(
         this->get_logger(),
-        "tilt_feedback=%s mode=%s imu_topic=%s imu_zero_on_start=%s kp_roll=%.3f kd_roll=%.3f kp_pitch=%.3f kd_pitch=%.3f deadband=%.4f max_effort=%.3f qref_bias_max=%.3f sign(r/p)=%.1f/%.1f weights roll(h/a/t)=%.2f/%.2f/%.2f pitch(h/a/k/t)=%.2f/%.2f/%.2f/%.2f",
-        enable_tilt_feedback_ ? "on" : "off", tilt_apply_mode_.c_str(), imu_topic_.c_str(), imu_zero_on_start_ ? "on" : "off",
+        "tilt_feedback=%s mode=%s imu_frame_mode=%s imu_topic=%s imu_zero_on_start=%s kp_roll=%.3f kd_roll=%.3f kp_pitch=%.3f kd_pitch=%.3f deadband=%.4f max_effort=%.3f qref_bias_max=%.3f sign(r/p)=%.1f/%.1f weights roll(h/a/t)=%.2f/%.2f/%.2f pitch(h/a/k/t)=%.2f/%.2f/%.2f/%.2f",
+        enable_tilt_feedback_ ? "on" : "off", tilt_apply_mode_.c_str(), imu_frame_mode_.c_str(), imu_topic_.c_str(), imu_zero_on_start_ ? "on" : "off",
         tilt_kp_roll_, tilt_kd_roll_, tilt_kp_pitch_, tilt_kd_pitch_,
         tilt_deadband_rad_, tilt_effort_abs_max_, tilt_qref_bias_abs_max_, tilt_roll_sign_, tilt_pitch_sign_,
         tilt_weight_roll_hip_, tilt_weight_roll_ankle_, tilt_weight_roll_torso_,
@@ -341,38 +408,14 @@ private:
       return;
     }
 
-    const double x = msg->orientation.x;
-    const double y = msg->orientation.y;
-    const double z = msg->orientation.z;
-    const double w = msg->orientation.w;
-
-    const double sinr_cosp = 2.0 * (w * x + y * z);
-    const double cosr_cosp = 1.0 - 2.0 * (x * x + y * y);
-    const double roll = std::atan2(sinr_cosp, cosr_cosp);
-
-    const double sinp = 2.0 * (w * y - z * x);
-    const double pitch = (std::abs(sinp) >= 1.0)
-                             ? std::copysign(1.5707963267948966, sinp)
-                             : std::asin(sinp);
-
-    if (imu_zero_on_start_ && !imu_bias_captured_)
+    const auto update = tilt_observer_.update_from_imu(*msg);
+    if (update.bias_captured_now)
     {
-      imu_roll_bias_rad_ = roll;
-      imu_pitch_bias_rad_ = pitch;
-      imu_bias_captured_ = true;
       RCLCPP_INFO(
           this->get_logger(),
-          "imu bias captured: roll=%.3f pitch=%.3f",
-          imu_roll_bias_rad_, imu_pitch_bias_rad_);
+          "imu bias captured: raw_roll=%.3f raw_pitch=%.3f bias_roll=%.3f bias_pitch=%.3f",
+          update.raw_roll_rad, update.raw_pitch_rad, update.bias_roll_rad, update.bias_pitch_rad);
     }
-
-    const double roll_bias = imu_zero_on_start_ ? imu_roll_bias_rad_ : 0.0;
-    const double pitch_bias = imu_zero_on_start_ ? imu_pitch_bias_rad_ : 0.0;
-    imu_roll_rad_ = normalize_angle_rad(roll - roll_bias);
-    imu_pitch_rad_ = pitch - pitch_bias;
-    imu_roll_rate_rad_s_ = msg->angular_velocity.x;
-    imu_pitch_rate_rad_s_ = msg->angular_velocity.y;
-    imu_received_ = true;
   }
 
   /**
@@ -408,17 +451,24 @@ private:
     const std::size_t joint_count = joint_names_.size();
     cmd_msg.effort.assign(joint_count, 0.0);
     last_stand_output_scale_ = 1.0;
-    // 관측용 tilt 진단 스냅샷은 매 주기 초기화 후, 적용된 값만 채운다.
-    last_tilt_dbg_pitch_input_rad_ = std::numeric_limits<double>::quiet_NaN();
-    last_tilt_dbg_pitch_rate_rad_s_ = std::numeric_limits<double>::quiet_NaN();
-    last_tilt_dbg_u_pitch_p_term_ = std::numeric_limits<double>::quiet_NaN();
-    last_tilt_dbg_u_pitch_d_term_ = std::numeric_limits<double>::quiet_NaN();
-    last_tilt_dbg_u_pitch_raw_ = std::numeric_limits<double>::quiet_NaN();
-    last_tilt_dbg_u_pitch_clamped_ = std::numeric_limits<double>::quiet_NaN();
-    last_tilt_dbg_pitch_alloc_hip_ = std::numeric_limits<double>::quiet_NaN();
-    last_tilt_dbg_pitch_alloc_ankle_ = std::numeric_limits<double>::quiet_NaN();
-    last_tilt_dbg_pitch_alloc_knee_ = std::numeric_limits<double>::quiet_NaN();
-    last_tilt_dbg_pitch_alloc_torso_ = std::numeric_limits<double>::quiet_NaN();
+    // 관측용 스냅샷은 매 주기 초기화 후, 실제로 적용된 값만 채운다.
+    tilt_debug_snapshot_ = rbci::TiltDebugSnapshot{};
+    reset_pitch_chain_debug_snapshot();
+    reset_ankle_effort_debug_snapshot();
+
+    if (!control_active_logged_ && joint_state_received_ && tilt_observer_.received())
+    {
+      control_active_logged_ = true;
+      rbci::ControlActiveSnapshot snapshot;
+      snapshot.joint_count = joint_names_.size();
+      snapshot.imu_raw_roll_rad = tilt_observer_.raw_roll_rad();
+      snapshot.imu_raw_pitch_rad = tilt_observer_.raw_pitch_rad();
+      snapshot.tilt_roll_rad = tilt_observer_.tilt_roll_rad();
+      snapshot.tilt_pitch_rad = tilt_observer_.tilt_pitch_rad();
+      snapshot.imu_frame_mode = imu_frame_mode_;
+      RCLCPP_INFO(this->get_logger(), "%s", rbci::format_control_active_sync(snapshot).c_str());
+    }
+
     apply_excitation(cmd_msg, now_steady);
 
     if (joint_count == 0U)
@@ -512,20 +562,32 @@ private:
     const double mean = sum / static_cast<double>(dt_samples_sec_.size());
     const double max_dt = *std::max_element(dt_samples_sec_.begin(), dt_samples_sec_.end());
     const double p95 = percentile(dt_samples_sec_, 0.95);
-    const double tilt_roll = imu_received_ ? imu_roll_rad_ : std::numeric_limits<double>::quiet_NaN();
-    const double tilt_pitch = imu_received_ ? imu_pitch_rad_ : std::numeric_limits<double>::quiet_NaN();
     const std::string top_error = summarize_top_stand_error_joints(stand_debug_top_error_count_);
 
-    RCLCPP_INFO(
-        this->get_logger(),
-        "loop_stats dt_mean=%.6f dt_max=%.6f dt_p95=%.6f miss_window=%zu miss_total=%zu samples=%zu tilt_r=%.3f tilt_p=%.3f stand_scale=%.2f top_err=%s pitch_rate=%.3f u_pitch_raw=%.3f u_pitch=%.3f u_pitch_p=%.3f u_pitch_d=%.3f alloc_p(h/a/k/t)=%.3f/%.3f/%.3f/%.3f",
-        mean, max_dt, p95, miss_count_window_, miss_count_total_, dt_samples_sec_.size(),
-        tilt_roll, tilt_pitch, last_stand_output_scale_, top_error.c_str(),
-        last_tilt_dbg_pitch_rate_rad_s_,
-        last_tilt_dbg_u_pitch_raw_, last_tilt_dbg_u_pitch_clamped_,
-        last_tilt_dbg_u_pitch_p_term_, last_tilt_dbg_u_pitch_d_term_,
-        last_tilt_dbg_pitch_alloc_hip_, last_tilt_dbg_pitch_alloc_ankle_,
-        last_tilt_dbg_pitch_alloc_knee_, last_tilt_dbg_pitch_alloc_torso_);
+    rbci::LoopStatsSnapshot snapshot;
+    snapshot.dt_mean = mean;
+    snapshot.dt_max = max_dt;
+    snapshot.dt_p95 = p95;
+    snapshot.miss_window = miss_count_window_;
+    snapshot.miss_total = miss_count_total_;
+    snapshot.samples = dt_samples_sec_.size();
+    snapshot.imu_raw_roll_rad =
+        tilt_observer_.received() ? tilt_observer_.raw_roll_rad() : std::numeric_limits<double>::quiet_NaN();
+    snapshot.imu_raw_pitch_rad =
+        tilt_observer_.received() ? tilt_observer_.raw_pitch_rad() : std::numeric_limits<double>::quiet_NaN();
+    snapshot.imu_bias_roll_rad = tilt_observer_.bias_roll_rad();
+    snapshot.imu_bias_pitch_rad = tilt_observer_.bias_pitch_rad();
+    snapshot.tilt_roll_rad =
+        tilt_observer_.received() ? tilt_observer_.tilt_roll_rad() : std::numeric_limits<double>::quiet_NaN();
+    snapshot.tilt_pitch_rad =
+        tilt_observer_.received() ? tilt_observer_.tilt_pitch_rad() : std::numeric_limits<double>::quiet_NaN();
+    snapshot.stand_scale = last_stand_output_scale_;
+    snapshot.top_error = top_error;
+    snapshot.tilt_debug = tilt_debug_snapshot_;
+    snapshot.pitch_chain = pitch_chain_debug_snapshot_;
+    snapshot.ankle_effort = ankle_effort_debug_snapshot_;
+
+    RCLCPP_INFO(this->get_logger(), "%s", rbci::format_loop_stats(snapshot).c_str());
   }
 
   /**
@@ -603,9 +665,8 @@ private:
       if (name == "imu_zero_on_start")
       {
         imu_zero_on_start_ = param.as_bool();
-        imu_bias_captured_ = false;
-        imu_roll_bias_rad_ = 0.0;
-        imu_pitch_bias_rad_ = 0.0;
+        tilt_observer_.set_zero_on_start(imu_zero_on_start_);
+        tilt_observer_.reset_bias();
         continue;
       }
       if (name == "target_joint")
@@ -1056,6 +1117,26 @@ private:
         tilt_apply_mode_ = v;
         continue;
       }
+      if (name == "imu_frame_mode" || name == "tilt_axis_mode")
+      {
+        const std::string v = param.as_string();
+        const std::string resolved = resolve_imu_frame_mode(v);
+        if (resolved.empty())
+        {
+          result.successful = false;
+          result.reason = "imu_frame_mode must be 'identity' or 'g1_imu_link' (legacy: standard/swap_rp)";
+          return result;
+        }
+        if (name == "tilt_axis_mode")
+        {
+          RCLCPP_WARN(
+              this->get_logger(),
+              "runtime parameter tilt_axis_mode is deprecated. use imu_frame_mode instead.");
+        }
+        imu_frame_mode_ = resolved;
+        tilt_observer_.set_frame_mode(imu_frame_mode_);
+        continue;
+      }
       if (name == "tilt_qref_bias_abs_max")
       {
         const double v = param.as_double();
@@ -1190,14 +1271,14 @@ private:
 
     RCLCPP_INFO(
         this->get_logger(),
-        "runtime parameters updated: signal_mode=%s stand_kp=%.3f stand_kd=%.3f stand_limit=%.3f hold=%s q_ref_len=%zu ctrl_joint_count=%zu stand_scales kp(h/k/a/t/o)=%.2f/%.2f/%.2f/%.2f/%.2f kd=%.2f/%.2f/%.2f/%.2f/%.2f tilt_fb=%s mode=%s imu_zero=%s kp(r/p)=%.3f/%.3f kd(r/p)=%.3f/%.3f deadband=%.4f max_effort=%.3f qref_bias_max=%.3f sign(r/p)=%.1f/%.1f w_roll(h/a/t)=%.2f/%.2f/%.2f w_pitch(h/a/k/t)=%.2f/%.2f/%.2f/%.2f",
+        "runtime parameters updated: signal_mode=%s stand_kp=%.3f stand_kd=%.3f stand_limit=%.3f hold=%s q_ref_len=%zu ctrl_joint_count=%zu stand_scales kp(h/k/a/t/o)=%.2f/%.2f/%.2f/%.2f/%.2f kd=%.2f/%.2f/%.2f/%.2f/%.2f tilt_fb=%s mode=%s imu_frame_mode=%s imu_zero=%s kp(r/p)=%.3f/%.3f kd(r/p)=%.3f/%.3f deadband=%.4f max_effort=%.3f qref_bias_max=%.3f sign(r/p)=%.1f/%.1f w_roll(h/a/t)=%.2f/%.2f/%.2f w_pitch(h/a/k/t)=%.2f/%.2f/%.2f/%.2f",
         signal_mode_.c_str(), stand_kp_, stand_kd_, stand_effort_abs_max_,
         stand_hold_current_on_start_ ? "true" : "false",
         stand_q_ref_param_.size(), stand_control_joints_param_.size(),
         stand_kp_scale_hip_, stand_kp_scale_knee_, stand_kp_scale_ankle_, stand_kp_scale_torso_, stand_kp_scale_other_,
         stand_kd_scale_hip_, stand_kd_scale_knee_, stand_kd_scale_ankle_, stand_kd_scale_torso_, stand_kd_scale_other_,
         enable_tilt_feedback_ ? "on" : "off",
-        tilt_apply_mode_.c_str(),
+        tilt_apply_mode_.c_str(), imu_frame_mode_.c_str(),
         imu_zero_on_start_ ? "on" : "off",
         tilt_kp_roll_, tilt_kp_pitch_, tilt_kd_roll_, tilt_kd_pitch_,
         tilt_deadband_rad_, tilt_effort_abs_max_, tilt_qref_bias_abs_max_, tilt_roll_sign_, tilt_pitch_sign_,
@@ -1276,35 +1357,13 @@ private:
         "unknown signal_mode '%s' (supported: zero|sine_effort|step_effort|stand_pd)", signal_mode_.c_str());
   }
 
-  static double normalize_angle_rad(const double angle_rad)
-  {
-    return std::atan2(std::sin(angle_rad), std::cos(angle_rad));
-  }
-
-  struct TiltFeedbackCommand
-  {
-    bool valid{false};
-    double u_roll{0.0};
-    double u_pitch{0.0};
-    double u_pitch_raw{std::numeric_limits<double>::quiet_NaN()};
-    double u_pitch_p{std::numeric_limits<double>::quiet_NaN()};
-    double u_pitch_d{std::numeric_limits<double>::quiet_NaN()};
-    double roll_w_hip{0.0};
-    double roll_w_ankle{0.0};
-    double roll_w_torso{0.0};
-    double pitch_w_hip{0.0};
-    double pitch_w_ankle{0.0};
-    double pitch_w_knee{0.0};
-    double pitch_w_torso{0.0};
-  };
-
-  bool compute_tilt_feedback_command(TiltFeedbackCommand &cmd)
+  bool compute_tilt_feedback_command(rbci::TiltFeedbackCommand &cmd)
   {
     if (!enable_tilt_feedback_)
     {
       return false;
     }
-    if (!imu_received_)
+    if (!tilt_observer_.received())
     {
       RCLCPP_WARN_THROTTLE(
           this->get_logger(), *this->get_clock(), 3000,
@@ -1316,8 +1375,8 @@ private:
       return false;
     }
 
-    double roll = imu_roll_rad_;
-    double pitch = imu_pitch_rad_;
+    double roll = tilt_observer_.tilt_roll_rad();
+    double pitch = tilt_observer_.tilt_pitch_rad();
     if (std::abs(roll) < tilt_deadband_rad_)
     {
       roll = 0.0;
@@ -1328,9 +1387,9 @@ private:
     }
 
     const double u_roll_raw =
-        tilt_roll_sign_ * ((tilt_kp_roll_ * (-roll)) + (tilt_kd_roll_ * (-imu_roll_rate_rad_s_)));
+        tilt_roll_sign_ * ((tilt_kp_roll_ * (-roll)) + (tilt_kd_roll_ * (-tilt_observer_.roll_rate_rad_s())));
     const double u_pitch_p = tilt_pitch_sign_ * (tilt_kp_pitch_ * (-pitch));
-    const double u_pitch_d = tilt_pitch_sign_ * (tilt_kd_pitch_ * (-imu_pitch_rate_rad_s_));
+    const double u_pitch_d = tilt_pitch_sign_ * (tilt_kd_pitch_ * (-tilt_observer_.pitch_rate_rad_s()));
     const double u_pitch_raw = u_pitch_p + u_pitch_d;
 
     double u_roll = u_roll_raw;
@@ -1372,21 +1431,21 @@ private:
     cmd.pitch_w_knee = tilt_weight_pitch_knee_ * pitch_norm;
     cmd.pitch_w_torso = tilt_weight_pitch_torso_ * pitch_norm;
 
-    last_tilt_dbg_pitch_input_rad_ = pitch;
-    last_tilt_dbg_pitch_rate_rad_s_ = imu_pitch_rate_rad_s_;
-    last_tilt_dbg_u_pitch_p_term_ = u_pitch_p;
-    last_tilt_dbg_u_pitch_d_term_ = u_pitch_d;
-    last_tilt_dbg_u_pitch_raw_ = u_pitch_raw;
-    last_tilt_dbg_u_pitch_clamped_ = u_pitch;
-    last_tilt_dbg_pitch_alloc_hip_ = u_pitch * cmd.pitch_w_hip;
-    last_tilt_dbg_pitch_alloc_ankle_ = u_pitch * cmd.pitch_w_ankle;
-    last_tilt_dbg_pitch_alloc_knee_ = u_pitch * cmd.pitch_w_knee;
-    last_tilt_dbg_pitch_alloc_torso_ = u_pitch * cmd.pitch_w_torso;
+    tilt_debug_snapshot_.pitch_input_rad = pitch;
+    tilt_debug_snapshot_.pitch_rate_rad_s = tilt_observer_.pitch_rate_rad_s();
+    tilt_debug_snapshot_.u_pitch_p_term = u_pitch_p;
+    tilt_debug_snapshot_.u_pitch_d_term = u_pitch_d;
+    tilt_debug_snapshot_.u_pitch_raw = u_pitch_raw;
+    tilt_debug_snapshot_.u_pitch_clamped = u_pitch;
+    tilt_debug_snapshot_.pitch_alloc_hip = u_pitch * cmd.pitch_w_hip;
+    tilt_debug_snapshot_.pitch_alloc_ankle = u_pitch * cmd.pitch_w_ankle;
+    tilt_debug_snapshot_.pitch_alloc_knee = u_pitch * cmd.pitch_w_knee;
+    tilt_debug_snapshot_.pitch_alloc_torso = u_pitch * cmd.pitch_w_torso;
     return true;
   }
 
   void apply_tilt_feedback_effort(
-      sensor_msgs::msg::JointState &cmd_msg, std::size_t usable_count, const TiltFeedbackCommand &tilt_cmd)
+      sensor_msgs::msg::JointState &cmd_msg, std::size_t usable_count, const rbci::TiltFeedbackCommand &tilt_cmd)
   {
     const auto add_effort = [&](int idx, double delta)
     {
@@ -1425,7 +1484,8 @@ private:
     add_effort(idx_torso_, +tilt_cmd.u_pitch * tilt_cmd.pitch_w_torso);
   }
 
-  void apply_tilt_feedback_qref_bias(std::vector<double> &effective_q_ref, const TiltFeedbackCommand &tilt_cmd)
+  void apply_tilt_feedback_qref_bias(
+      std::vector<double> &effective_q_ref, const rbci::TiltFeedbackCommand &tilt_cmd)
   {
     const auto add_bias = [&](int idx, double delta)
     {
@@ -1458,6 +1518,127 @@ private:
     add_bias(idx_left_knee_, +tilt_cmd.u_pitch * tilt_cmd.pitch_w_knee);
     add_bias(idx_right_knee_, +tilt_cmd.u_pitch * tilt_cmd.pitch_w_knee);
     add_bias(idx_torso_, +tilt_cmd.u_pitch * tilt_cmd.pitch_w_torso);
+  }
+
+  void reset_pitch_chain_debug_snapshot()
+  {
+    pitch_chain_debug_snapshot_ = rbci::PitchChainDebugSnapshot{};
+  }
+
+  void reset_ankle_effort_debug_snapshot()
+  {
+    ankle_effort_debug_snapshot_ = rbci::AnkleEffortDebugSnapshot{};
+  }
+
+  static double read_joint_value_or_nan(const std::vector<double> &values, int idx)
+  {
+    if (idx < 0)
+    {
+      return std::numeric_limits<double>::quiet_NaN();
+    }
+    const std::size_t i = static_cast<std::size_t>(idx);
+    if (i >= values.size())
+    {
+      return std::numeric_limits<double>::quiet_NaN();
+    }
+    return values[i];
+  }
+
+  static double average_joint_pair_or_nan(const std::vector<double> &values, int idx_a, int idx_b)
+  {
+    double sum = 0.0;
+    std::size_t count = 0U;
+    const double value_a = read_joint_value_or_nan(values, idx_a);
+    if (!std::isnan(value_a))
+    {
+      sum += value_a;
+      ++count;
+    }
+    const double value_b = read_joint_value_or_nan(values, idx_b);
+    if (!std::isnan(value_b))
+    {
+      sum += value_b;
+      ++count;
+    }
+    if (count == 0U)
+    {
+      return std::numeric_limits<double>::quiet_NaN();
+    }
+    return sum / static_cast<double>(count);
+  }
+
+  double applied_qref_bias_or_nan(int idx, double delta) const
+  {
+    if (idx < 0)
+    {
+      return std::numeric_limits<double>::quiet_NaN();
+    }
+    const std::size_t i = static_cast<std::size_t>(idx);
+    if (i >= stand_control_mask_.size())
+    {
+      return std::numeric_limits<double>::quiet_NaN();
+    }
+    return (stand_control_mask_[i] == 0U) ? 0.0 : delta;
+  }
+
+  double average_applied_qref_bias_or_nan(int idx_a, int idx_b, double delta) const
+  {
+    double sum = 0.0;
+    std::size_t count = 0U;
+    const double bias_a = applied_qref_bias_or_nan(idx_a, delta);
+    if (!std::isnan(bias_a))
+    {
+      sum += bias_a;
+      ++count;
+    }
+    const double bias_b = applied_qref_bias_or_nan(idx_b, delta);
+    if (!std::isnan(bias_b))
+    {
+      sum += bias_b;
+      ++count;
+    }
+    if (count == 0U)
+    {
+      return std::numeric_limits<double>::quiet_NaN();
+    }
+    return sum / static_cast<double>(count);
+  }
+
+  // loop_stats에서 바로 볼 수 있게 실제 적용된 pitch-chain ref/meas/bias를 스냅샷으로 저장한다.
+  void capture_pitch_chain_debug_snapshot(
+      const std::vector<double> &effective_q_ref, const rbci::TiltFeedbackCommand *tilt_cmd)
+  {
+    pitch_chain_debug_snapshot_.torso_ref = read_joint_value_or_nan(effective_q_ref, idx_torso_);
+    pitch_chain_debug_snapshot_.torso_meas = read_joint_value_or_nan(latest_joint_positions_, idx_torso_);
+    pitch_chain_debug_snapshot_.hip_ref_avg =
+        average_joint_pair_or_nan(effective_q_ref, idx_left_hip_pitch_, idx_right_hip_pitch_);
+    pitch_chain_debug_snapshot_.hip_meas_avg =
+        average_joint_pair_or_nan(latest_joint_positions_, idx_left_hip_pitch_, idx_right_hip_pitch_);
+    pitch_chain_debug_snapshot_.knee_ref_avg =
+        average_joint_pair_or_nan(effective_q_ref, idx_left_knee_, idx_right_knee_);
+    pitch_chain_debug_snapshot_.knee_meas_avg =
+        average_joint_pair_or_nan(latest_joint_positions_, idx_left_knee_, idx_right_knee_);
+    pitch_chain_debug_snapshot_.ankle_ref_avg =
+        average_joint_pair_or_nan(effective_q_ref, idx_left_ankle_pitch_, idx_right_ankle_pitch_);
+    pitch_chain_debug_snapshot_.ankle_meas_avg =
+        average_joint_pair_or_nan(latest_joint_positions_, idx_left_ankle_pitch_, idx_right_ankle_pitch_);
+    if (tilt_cmd == nullptr)
+    {
+      pitch_chain_debug_snapshot_.bias_torso = 0.0;
+      pitch_chain_debug_snapshot_.bias_hip = 0.0;
+      pitch_chain_debug_snapshot_.bias_knee = 0.0;
+      pitch_chain_debug_snapshot_.bias_ankle = 0.0;
+      return;
+    }
+
+    pitch_chain_debug_snapshot_.bias_hip = average_applied_qref_bias_or_nan(
+        idx_left_hip_pitch_, idx_right_hip_pitch_, tilt_cmd->u_pitch * tilt_cmd->pitch_w_hip);
+    pitch_chain_debug_snapshot_.bias_knee = average_applied_qref_bias_or_nan(
+        idx_left_knee_, idx_right_knee_, tilt_cmd->u_pitch * tilt_cmd->pitch_w_knee);
+    pitch_chain_debug_snapshot_.bias_ankle = average_applied_qref_bias_or_nan(
+        idx_left_ankle_pitch_, idx_right_ankle_pitch_, tilt_cmd->u_pitch * tilt_cmd->pitch_w_ankle);
+    pitch_chain_debug_snapshot_.bias_torso =
+        applied_qref_bias_or_nan(idx_torso_, tilt_cmd->u_pitch * tilt_cmd->pitch_w_torso);
   }
 
   /**
@@ -1501,12 +1682,20 @@ private:
         std::min(cmd_msg.effort.size(), latest_joint_positions_.size()),
         std::min(latest_joint_velocities_.size(), stand_q_ref_active_.size()));
 
-    TiltFeedbackCommand tilt_cmd;
+    rbci::TiltFeedbackCommand tilt_cmd;
     const bool has_tilt_cmd = compute_tilt_feedback_command(tilt_cmd);
     if (has_tilt_cmd && tilt_apply_mode_ == "qref_bias")
     {
       apply_tilt_feedback_qref_bias(effective_q_ref, tilt_cmd);
     }
+    const rbci::TiltFeedbackCommand *pitch_bias_debug_cmd =
+        (has_tilt_cmd && tilt_apply_mode_ == "qref_bias") ? &tilt_cmd : nullptr;
+    capture_pitch_chain_debug_snapshot(effective_q_ref, pitch_bias_debug_cmd);
+
+    double ankle_pd_sum = 0.0;
+    double ankle_limit_sum = 0.0;
+    double ankle_pre_clamp_sum = 0.0;
+    std::size_t ankle_sample_count = 0U;
 
     for (std::size_t i = 0; i < usable_count; ++i)
     {
@@ -1524,20 +1713,67 @@ private:
       const double damping_term = -latest_joint_velocities_[i];
       const double kp_eff = stand_kp_ * stand_kp_scale_per_joint_[i];
       const double kd_eff = stand_kd_ * stand_kd_scale_per_joint_[i];
-      double effort_cmd = (kp_eff * position_error) + (kd_eff * damping_term);
-      effort_cmd += compute_limit_avoid_effort(i, latest_joint_positions_[i], latest_joint_velocities_[i]);
-      effort_cmd *= stand_output_scale;
+      const double effort_pd = (kp_eff * position_error) + (kd_eff * damping_term);
+      const double effort_limit_avoid =
+          compute_limit_avoid_effort(i, latest_joint_positions_[i], latest_joint_velocities_[i]);
+      const double effort_pre_clamp = (effort_pd + effort_limit_avoid) * stand_output_scale;
+      double effort_cmd = effort_pre_clamp;
       if (stand_effort_abs_max_ > 0.0)
       {
         effort_cmd = std::clamp(effort_cmd, -stand_effort_abs_max_, stand_effort_abs_max_);
       }
       cmd_msg.effort[i] = effort_cmd;
+
+      if (static_cast<int>(i) == idx_left_ankle_pitch_ || static_cast<int>(i) == idx_right_ankle_pitch_)
+      {
+        ankle_pd_sum += effort_pd;
+        ankle_limit_sum += effort_limit_avoid;
+        ankle_pre_clamp_sum += effort_pre_clamp;
+        ++ankle_sample_count;
+      }
     }
 
     if (has_tilt_cmd && tilt_apply_mode_ == "effort")
     {
       apply_tilt_feedback_effort(cmd_msg, usable_count, tilt_cmd);
     }
+
+    if (ankle_sample_count == 0U)
+    {
+      return;
+    }
+
+    double ankle_cmd_sum = 0.0;
+    std::size_t ankle_sat_count = 0U;
+    const double sat_threshold =
+        (stand_effort_abs_max_ > 0.0) ? (stand_effort_abs_max_ - 1e-6) : std::numeric_limits<double>::infinity();
+    const auto accumulate_final_ankle = [&](int idx)
+    {
+      if (idx < 0)
+      {
+        return;
+      }
+      const std::size_t joint_idx = static_cast<std::size_t>(idx);
+      if (joint_idx >= cmd_msg.effort.size())
+      {
+        return;
+      }
+      const double effort = cmd_msg.effort[joint_idx];
+      ankle_cmd_sum += effort;
+      if (stand_effort_abs_max_ > 0.0 && std::abs(effort) >= sat_threshold)
+      {
+        ++ankle_sat_count;
+      }
+    };
+    accumulate_final_ankle(idx_left_ankle_pitch_);
+    accumulate_final_ankle(idx_right_ankle_pitch_);
+
+    const double ankle_count = static_cast<double>(ankle_sample_count);
+    ankle_effort_debug_snapshot_.pd_avg = ankle_pd_sum / ankle_count;
+    ankle_effort_debug_snapshot_.limit_avg = ankle_limit_sum / ankle_count;
+    ankle_effort_debug_snapshot_.pre_clamp_avg = ankle_pre_clamp_sum / ankle_count;
+    ankle_effort_debug_snapshot_.cmd_avg = ankle_cmd_sum / ankle_count;
+    ankle_effort_debug_snapshot_.sat_count = ankle_sat_count;
   }
 
   /**
@@ -1553,7 +1789,7 @@ private:
       stand_tilt_cut_active_ = false;
       return 1.0;
     }
-    if (!imu_received_)
+    if (!tilt_observer_.received())
     {
       RCLCPP_WARN_THROTTLE(
           this->get_logger(), *this->get_clock(), 3000,
@@ -1561,7 +1797,8 @@ private:
       return 1.0;
     }
 
-    const double tilt_abs = std::max(std::abs(imu_roll_rad_), std::abs(imu_pitch_rad_));
+    const double tilt_abs = std::max(
+        std::abs(tilt_observer_.tilt_roll_rad()), std::abs(tilt_observer_.tilt_pitch_rad()));
     if (!stand_tilt_cut_active_)
     {
       if (tilt_abs >= stand_tilt_cut_rad_)
@@ -2029,6 +2266,7 @@ private:
   double tilt_kd_pitch_{2.5};
   double tilt_deadband_rad_{0.03};
   std::string tilt_apply_mode_{"effort"};
+  std::string imu_frame_mode_{"identity"};
   double tilt_effort_abs_max_{1.8};
   double tilt_qref_bias_abs_max_{0.20};
   double tilt_roll_sign_{1.0};
@@ -2063,28 +2301,15 @@ private:
   bool stand_tilt_cut_active_{false};
   bool limit_avoid_map_ready_{false};
   bool limit_avoid_invalid_warned_{false};
-  bool imu_received_{false};
   bool imu_zero_on_start_{false};
-  bool imu_bias_captured_{false};
+  bool control_active_logged_{false};
   bool tilt_joint_index_ready_{false};
   bool tilt_joint_index_warned_{false};
 
-  double imu_roll_rad_{0.0};
-  double imu_pitch_rad_{0.0};
-  double imu_roll_bias_rad_{0.0};
-  double imu_pitch_bias_rad_{0.0};
-  double imu_roll_rate_rad_s_{0.0};
-  double imu_pitch_rate_rad_s_{0.0};
-  double last_tilt_dbg_pitch_input_rad_{std::numeric_limits<double>::quiet_NaN()};
-  double last_tilt_dbg_pitch_rate_rad_s_{std::numeric_limits<double>::quiet_NaN()};
-  double last_tilt_dbg_u_pitch_p_term_{std::numeric_limits<double>::quiet_NaN()};
-  double last_tilt_dbg_u_pitch_d_term_{std::numeric_limits<double>::quiet_NaN()};
-  double last_tilt_dbg_u_pitch_raw_{std::numeric_limits<double>::quiet_NaN()};
-  double last_tilt_dbg_u_pitch_clamped_{std::numeric_limits<double>::quiet_NaN()};
-  double last_tilt_dbg_pitch_alloc_hip_{std::numeric_limits<double>::quiet_NaN()};
-  double last_tilt_dbg_pitch_alloc_ankle_{std::numeric_limits<double>::quiet_NaN()};
-  double last_tilt_dbg_pitch_alloc_knee_{std::numeric_limits<double>::quiet_NaN()};
-  double last_tilt_dbg_pitch_alloc_torso_{std::numeric_limits<double>::quiet_NaN()};
+  rbci::TiltObserver tilt_observer_{};
+  rbci::TiltDebugSnapshot tilt_debug_snapshot_{};
+  rbci::PitchChainDebugSnapshot pitch_chain_debug_snapshot_{};
+  rbci::AnkleEffortDebugSnapshot ankle_effort_debug_snapshot_{};
 
   int idx_left_hip_roll_{-1};
   int idx_right_hip_roll_{-1};

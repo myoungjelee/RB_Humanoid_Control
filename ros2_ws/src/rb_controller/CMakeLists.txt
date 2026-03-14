@@ -12,6 +12,8 @@ find_package(sensor_msgs REQUIRED)
 
 add_executable(rb_controller_node
   src/controller_node.cpp
+  src/controller_tilt_observer.cpp
+  src/controller_debug_logger.cpp
 )
 
 add_executable(rb_safety_node
