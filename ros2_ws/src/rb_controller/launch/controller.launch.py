@@ -5,10 +5,47 @@ This launch file provides one-line startup for controller + safety and loads
 """
 
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument
+from launch.actions import DeclareLaunchArgument, OpaqueFunction
 from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
 from launch_ros.actions import Node
 from launch_ros.substitutions import FindPackageShare
+
+
+def _launch_setup(context, *args, **kwargs):
+    """Build nodes after resolving optional controller-only parameter overrides."""
+    controller_parameters = [
+        LaunchConfiguration("params_file"),
+        {"use_sim_time": LaunchConfiguration("use_sim_time")},
+    ]
+    controller_override = LaunchConfiguration(
+        "enable_tilt_feedback_override"
+    ).perform(context)
+    if controller_override in ("true", "false"):
+        controller_parameters.append(
+            {"enable_tilt_feedback": controller_override == "true"}
+        )
+
+    controller_node = Node(
+        package="rb_controller",
+        executable="rb_controller_node",
+        name="rb_controller",
+        output="screen",
+        parameters=controller_parameters,
+        arguments=["--ros-args", "--log-level", LaunchConfiguration("log_level")],
+    )
+
+    safety_node = Node(
+        package="rb_controller",
+        executable="rb_safety_node",
+        name="rb_safety",
+        output="screen",
+        parameters=[
+            LaunchConfiguration("params_file"),
+            {"use_sim_time": LaunchConfiguration("use_sim_time")},
+        ],
+        arguments=["--ros-args", "--log-level", LaunchConfiguration("log_level")],
+    )
+    return [controller_node, safety_node]
 
 
 def generate_launch_description() -> LaunchDescription:
@@ -36,30 +73,13 @@ def generate_launch_description() -> LaunchDescription:
         default_value="info",
         description="Logging level for rb_controller node.",
     )
-
-    # 기본 실행 경로: safety.yaml + use_sim_time를 자동 주입해 한 줄 실행을 보장한다.
-    controller_node = Node(
-        package="rb_controller",
-        executable="rb_controller_node",
-        name="rb_controller",
-        output="screen",
-        parameters=[
-            LaunchConfiguration("params_file"),
-            {"use_sim_time": LaunchConfiguration("use_sim_time")},
-        ],
-        arguments=["--ros-args", "--log-level", LaunchConfiguration("log_level")],
-    )
-
-    safety_node = Node(
-        package="rb_controller",
-        executable="rb_safety_node",
-        name="rb_safety",
-        output="screen",
-        parameters=[
-            LaunchConfiguration("params_file"),
-            {"use_sim_time": LaunchConfiguration("use_sim_time")},
-        ],
-        arguments=["--ros-args", "--log-level", LaunchConfiguration("log_level")],
+    enable_tilt_feedback_override_arg = DeclareLaunchArgument(
+        "enable_tilt_feedback_override",
+        default_value="keep",
+        description=(
+            "Optional controller-only override for enable_tilt_feedback. "
+            "Use true/false to force M8 OFF/ON comparison, or keep to use YAML."
+        ),
     )
 
     return LaunchDescription(
@@ -67,7 +87,7 @@ def generate_launch_description() -> LaunchDescription:
             params_file_arg,
             use_sim_time_arg,
             log_level_arg,
-            controller_node,
-            safety_node,
+            enable_tilt_feedback_override_arg,
+            OpaqueFunction(function=_launch_setup),
         ]
     )

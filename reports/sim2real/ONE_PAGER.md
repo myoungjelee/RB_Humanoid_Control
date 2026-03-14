@@ -32,6 +32,7 @@ Isaac Sim과 실기체에서 재사용 가능한 ROS2 제어 스택 인터페이
 | M5 | controller-only standing hold | `fall_event`, `sync marker`, `loop_stats`, GUI 관찰 | [STATUS](../../STATUS.md), [stand_pd_sanity.yaml](../../ros2_ws/src/rb_controller/config/scenarios/stand_pd_sanity.yaml) |
 | M6 | 증빙/아티팩트 인프라 | `fall_event.txt`, `sync_markers.txt`, `loop_post_sync.txt`, `loop_before_fall.txt` | [overview.md](overview.md), [STATUS](../../STATUS.md) |
 | M7 | safety-on standing 재통합 | `CONTROL_ACTIVE` 기준 60초 `NO_FALL_EVENT`, `NO_SAFETY_REASON` | [stand_pd_safecheck.yaml](../../ros2_ws/src/rb_controller/config/scenarios/stand_pd_safecheck.yaml), [m7_stand_safecheck.yaml](../../ops/tmuxp/m7_stand_safecheck.yaml) |
+| M8 | disturbance A/B | `113N x 0.10s`에서 `OFF 3/3 fall`, `ON 3/3 no-fall` | [stand_pd_balance_base.yaml](../../ros2_ws/src/rb_controller/config/scenarios/stand_pd_balance_base.yaml), [run_m8_pair.sh](../../ops/run_m8_pair.sh) |
 
 ## M5에서 실제로 해결한 것
 - 초기에는 no-disturbance standing도 `1~2초` 안쪽 전방 붕괴
@@ -67,7 +68,8 @@ Isaac Sim과 실기체에서 재사용 가능한 ROS2 제어 스택 인터페이
 - M5 controller-only standing hold 확보
 - M6 증빙/아티팩트 인프라 완료
 - M7 safety-on standing 완료
-- 다음 단계: 같은 외란에서 balance feedback OFF/ON 비교 -> KPI 자동화 -> 포트폴리오 패키징
+- M8 대표 disturbance A/B 확보
+- 다음 단계: KPI 자동화 -> 포트폴리오 패키징
 
 ## 핵심 링크
 - 랜딩 페이지: [README.md](../../README.md)

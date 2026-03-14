@@ -3,8 +3,8 @@ rb_controller:
     signal_mode: stand_pd
     log_interval_sec: 0.2
     # M8 balance ON: M7에서 통과한 safety-on standing baseline 그대로 사용한다.
-    stand_kp: 60.0
-    stand_kd: 4.0
+    stand_kp: 50.0
+    stand_kd: 3.5
     stand_effort_abs_max: 18.0
     stand_hold_current_on_start: false
     stand_q_ref:
@@ -77,13 +77,13 @@ rb_controller:
     enable_tilt_feedback: true
     tilt_apply_mode: qref_bias
     imu_frame_mode: g1_imu_link
-    tilt_qref_bias_abs_max: 0.15
-    tilt_kp_roll: 10.0
-    tilt_kd_roll: 2.0
+    tilt_qref_bias_abs_max: 0.08
+    tilt_kp_roll: 4.0
+    tilt_kd_roll: 0.8
     tilt_weight_roll_hip: 0.7
     tilt_weight_roll_ankle: 0.3
     tilt_weight_roll_torso: 0.0
-    tilt_kp_pitch: 20.0
+    tilt_kp_pitch: 12.0
     tilt_kd_pitch: 2.0
     tilt_effort_abs_max: 4.0
     tilt_weight_pitch_hip: 0.8

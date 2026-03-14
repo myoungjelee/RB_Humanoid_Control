@@ -50,15 +50,18 @@ ROS2 기반 Sim-to-Real control stack
 - Isaac Sim + original G1 asset + direct spawn
 - standalone `World.step()`
 
-최종적으로는 아래 4개 책임 분리를 목표로 한다.
+최종적으로는 아래 책임 분리를 목표로 한다.
 
 - Estimator / Observer
+- Planner / Behavior
 - Controller
 - Safety
 - Logger / Recorder
 
 즉 지금은 하나의 스택 안에서 검증을 진행하고,
 최종적으로는 책임이 분리된 ROS2 시스템으로 정리한다.
+
+---
 
 ## 3.2 baseline 트랙
 
@@ -87,7 +90,7 @@ effort
 
 Topic namespace
 /clock
-/rb/*
+/rb/\*
 
 Joint ordering source
 `ros2_ws/src/rb_bringup/config/joint_order_g1.yaml`
@@ -252,12 +255,14 @@ state estimator 분리는 후속 milestone(M11)에서 진행한다.
 
 기존 controller는 `imu_link` raw orientation을
 이미 body/control frame에 정렬된 roll/pitch처럼 직접 사용하고 있었다.
+
 그 결과 실제 전방 붕괴가 `pitch`가 아니라 `roll` 채널 변화로 들어갔다.
 
 해결
 
 IMU publisher를 뒤집지 않고,
 observer에서 `imu_link -> control frame` 보정을 적용한다.
+
 현재 기준 구현은 `imu_frame_mode=g1_imu_link`다.
 
 현재 상태
@@ -283,8 +288,8 @@ controller-only no-disturbance standing 확보
 
 출력 구조
 
-- `logs/`
-- `summary/`
+- `logs/sim2real/<milestone>/<run_id>/`
+- `reports/sim2real/`
 - `artifacts/`
 
 핵심 질문
@@ -334,13 +339,24 @@ standing을 불필요하게 끊지 않는다.
 
 예
 
-- torso impulse
-- lateral push
+- torso impulse (1차)
+- lateral push (후속)
 
-결과
+목표 결과
 
 - OFF → 바로 넘어짐
-- ON  → 더 오래 버팀
+- ON → 더 오래 버팀
+
+또는
+
+- 둘 다 survive하지만
+- ON의 peak tilt가 더 작음
+
+현재 대표 증빙(2026-03-14 기준)
+
+- `113N x 0.10s` sagittal torso impulse
+- `balance feedback OFF`: `3/3 fall`
+- `balance feedback ON`: `3/3 no-fall`
 
 설명
 
@@ -450,11 +466,8 @@ low-level stabilizing controller 위에 policy layer를 추가한다.
 
 구조
 
-low level
-stabilizing controller
-
-high level
-policy / residual / reference
+low level stabilizing controller
+→ high level policy / residual / reference
 
 ---
 
@@ -488,20 +501,84 @@ policy / residual / reference
 
 ---
 
+# M17 — Real-Time Execution Layer (RT Linux)
+
+목표
+
+control loop를 실제 로봇 환경에서 deterministic하게 실행하도록
+real-time execution 환경을 구축한다.
+
+핵심 작업
+
+- PREEMPT_RT kernel 적용
+- CPU isolation
+- controller thread priority 설정
+- ROS2 executor scheduling 분석
+- control loop latency / jitter 측정
+
+측정 항목
+
+- control loop latency
+- scheduling jitter
+- dt variance (RT vs non-RT)
+
+핵심 질문
+
+제어 루프가 실제 로봇 환경에서도 deterministic하게 동작하는가
+
+---
+
+# M18 — Behavior / Task Planner
+
+목표
+
+low-level controller 위에 behavior / task planner 계층을 추가해
+휴머노이드 전체 제어 시스템을 완성한다.
+
+planner는 robot state / disturbance 상태 / task mode를 기반으로
+action primitive를 선택하고 controller reference를 생성한다.
+
+구조
+
+planner
+→ reference generation
+→ controller
+→ actuator
+
+초기 planner 범위
+
+- stand
+- sit
+- recover
+- step preparation
+
+핵심 질문
+
+low-level controller 위에 behavior layer를 올려
+전체 humanoid control loop를 구성할 수 있는가
+
+---
+
 # 8. 최종 아키텍처 비전
 
-최종적으로는 아래 4개 책임을 분리한다.
+최종 시스템 구조
 
 Sensors
 (`/clock`, `/rb/joint_states`, `/rb/imu`)
 
 → Estimator
 
+→ Planner / Behavior Layer
+
 → Controller
 
 → Safety
 
-→ Logger
+→ Actuator
+
+→ Logger / Recorder
+
+---
 
 현재 단계에서는 runtime 변수를 늘리지 않기 위해
 
@@ -515,10 +592,12 @@ Sensors
 - tilt observer
 - debug logger
 
-를 한 노드 안에서 분리하고,
-최종적으로는 아래 4개 ROS 노드를 목표로 한다.
+를 한 노드 안에서 분리한다.
+
+최종적으로는 다음 ROS 노드 구조를 목표로 한다.
 
 - Estimator
+- Planner
 - Controller
 - Safety
 - Logger
@@ -529,8 +608,7 @@ Sensors
 
 현재 우선순위는 아래 순서로 고정한다.
 
-1. M7 — Safety-On Standing
-2. M8 — Disturbance A/B
-3. M9 — KPI Automation
-4. M10 — Portfolio Packaging
-5. 이후 M11+ 확장
+1. M8 — Disturbance A/B
+2. M9 — KPI Automation
+3. M10 — Portfolio Packaging
+4. 이후 M11+ 확장

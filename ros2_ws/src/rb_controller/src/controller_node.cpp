@@ -88,6 +88,8 @@ public:
     stand_kd_scale_other_ = this->declare_parameter<double>("stand_kd_scale_other", 1.0);
     stand_q_ref_param_ =
         this->declare_parameter<std::vector<double>>("stand_q_ref", std::vector<double>{});
+    stand_q_ref_trim_param_ =
+        this->declare_parameter<std::vector<double>>("stand_q_ref_trim", std::vector<double>{});
     // 비어 있으면 모든 조인트를 제어한다. 값이 있으면 지정한 조인트만 stand_pd를 적용한다.
     stand_control_joints_param_ =
         this->declare_parameter<std::vector<std::string>>("stand_control_joints", std::vector<std::string>{});
@@ -883,6 +885,15 @@ private:
         stand_q_ref_param_ = param.as_double_array();
         stand_reference_ready_ = false;
         stand_ref_param_size_warned_ = false;
+        stand_ref_trim_param_size_warned_ = false;
+        continue;
+      }
+      if (name == "stand_q_ref_trim")
+      {
+        stand_q_ref_trim_param_ = param.as_double_array();
+        stand_reference_ready_ = false;
+        stand_ref_param_size_warned_ = false;
+        stand_ref_trim_param_size_warned_ = false;
         continue;
       }
       if (name == "stand_control_joints")
@@ -1952,7 +1963,8 @@ private:
    * @brief stand_pd 기준자세(q_ref)를 준비한다.
    *
    * 우선순위:
-   * 1) stand_q_ref 파라미터(길이 일치 시)
+   * 1) stand_q_ref baseline 파라미터(길이 일치 시)
+   *    + stand_q_ref_trim 파라미터(길이 일치 시 baseline에 더함)
    * 2) stand_hold_current_on_start=true 이면 현재 joint position 스냅샷
    */
   bool ensure_stand_reference_ready()
@@ -1972,10 +1984,31 @@ private:
       if (stand_q_ref_param_.size() == joint_names_.size())
       {
         stand_q_ref_active_ = stand_q_ref_param_;
+        bool trim_applied = false;
+        if (!stand_q_ref_trim_param_.empty())
+        {
+          if (stand_q_ref_trim_param_.size() == joint_names_.size())
+          {
+            for (std::size_t i = 0; i < stand_q_ref_active_.size(); ++i)
+            {
+              stand_q_ref_active_[i] += stand_q_ref_trim_param_[i];
+            }
+            trim_applied = true;
+          }
+          else if (!stand_ref_trim_param_size_warned_)
+          {
+            stand_ref_trim_param_size_warned_ = true;
+            RCLCPP_WARN(
+                this->get_logger(),
+                "stand_q_ref_trim size mismatch: trim=%zu joint_count=%zu. ignore trim and use baseline stand_q_ref only",
+                stand_q_ref_trim_param_.size(), joint_names_.size());
+          }
+        }
         stand_reference_ready_ = true;
         RCLCPP_INFO(
             this->get_logger(),
-            "stand_pd reference loaded from stand_q_ref parameter (count=%zu)",
+            "stand_pd reference loaded from stand_q_ref baseline%s (count=%zu)",
+            trim_applied ? " + stand_q_ref_trim" : "",
             stand_q_ref_active_.size());
         return true;
       }
@@ -2250,6 +2283,7 @@ private:
   std::size_t stand_debug_top_error_count_{3};
   double last_stand_output_scale_{1.0};
   std::vector<double> stand_q_ref_param_;
+  std::vector<double> stand_q_ref_trim_param_;
   std::vector<std::string> stand_control_joints_param_;
   bool limit_avoid_enable_{false};
   double limit_avoid_margin_rad_{0.05};
@@ -2295,6 +2329,7 @@ private:
   bool joint_state_received_{false};
   bool stand_reference_ready_{false};
   bool stand_ref_param_size_warned_{false};
+  bool stand_ref_trim_param_size_warned_{false};
   bool stand_control_mask_ready_{false};
   bool stand_gain_map_ready_{false};
   bool stand_control_unknown_warned_{false};

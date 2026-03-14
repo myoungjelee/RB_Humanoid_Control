@@ -27,6 +27,38 @@ TASK_ID_BY_SHORT = {
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 
 
+def _canonicalize_disturbance_frame_mode(mode: str) -> str:
+    """외란 입력 force/torque를 어떤 기준축으로 해석할지 정규화한다."""
+    value = str(mode).strip().lower()
+    if value in {"identity", "body_local", "torso_local"}:
+        return "identity"
+    if value in {"g1_imu_link", "control_frame"}:
+        return "g1_imu_link"
+    return "identity"
+
+
+def _remap_disturbance_wrench(
+    force_xyz: tuple[float, float, float],
+    torque_xyz: tuple[float, float, float],
+    frame_mode: str,
+) -> tuple[tuple[float, float, float], tuple[float, float, float]]:
+    """설정된 control frame wrench를 실제 torso local frame wrench로 변환한다.
+
+    `g1_imu_link`는 현재 observer가 사용하는 control frame 정의와 맞춘다.
+    경험적으로 torso local X 입력은 control roll로 들어가고,
+    control pitch(앞뒤) 입력은 torso local Y에서 더 직접적으로 관측됐다.
+    그래서 control-force [fx, fy, fz]를 torso-local [fy, fx, fz]로 치환한다.
+    """
+    if frame_mode != "g1_imu_link":
+        return force_xyz, torque_xyz
+
+    fx, fy, fz = force_xyz
+    tx, ty, tz = torque_xyz
+    mapped_force = (fy, fx, fz)
+    mapped_torque = (ty, tx, tz)
+    return mapped_force, mapped_torque
+
+
 def resolve_task_id(task_short: str) -> str:
     """사용자 친화 키(flat/rough/stand)를 실제 gym task id로 변환."""
     if task_short not in TASK_ID_BY_SHORT:
@@ -117,13 +149,29 @@ class StandaloneDirectWorld:
         self._disturbance_active = False
         self._disturbance_completed = False
         self._disturbance_start_elapsed_sec = float(self._disturbance_cfg.get("start_elapsed_sec", 5.0))
+        self._disturbance_start_after_control_active_sec = float(
+            self._disturbance_cfg.get("start_after_control_active_sec", -1.0)
+        )
         self._disturbance_duration_sec = float(self._disturbance_cfg.get("duration_sec", 0.2))
         self._disturbance_end_elapsed_sec = self._disturbance_start_elapsed_sec + self._disturbance_duration_sec
+        self._disturbance_sync_marker_path = str(os.environ.get("DISTURBANCE_SYNC_MARKER", "")).strip()
+        self._disturbance_control_active_elapsed_sec: float | None = None
         self._disturbance_is_global = bool(self._disturbance_cfg.get("is_global", True))
+        self._disturbance_frame_mode = _canonicalize_disturbance_frame_mode(
+            str(self._disturbance_cfg.get("frame_mode", "identity"))
+        )
         force_xyz = self._disturbance_cfg.get("force_xyz", [0.0, 0.0, 0.0])
         torque_xyz = self._disturbance_cfg.get("torque_xyz", [0.0, 0.0, 0.0])
         self._disturbance_force_xyz = tuple(float(v) for v in force_xyz)
         self._disturbance_torque_xyz = tuple(float(v) for v in torque_xyz)
+        (
+            self._disturbance_applied_force_xyz,
+            self._disturbance_applied_torque_xyz,
+        ) = _remap_disturbance_wrench(
+            self._disturbance_force_xyz,
+            self._disturbance_torque_xyz,
+            self._disturbance_frame_mode,
+        )
         disturbance_body_candidates = self._disturbance_cfg.get(
             "body_name_candidates", ["torso_link", "torso", "base_link"]
         )
@@ -145,11 +193,16 @@ class StandaloneDirectWorld:
             print(
                 "[CONFIG] disturbance enabled "
                 f"start_elapsed_sec={self._disturbance_start_elapsed_sec:.2f} "
+                f"start_after_control_active_sec={self._disturbance_start_after_control_active_sec:.2f} "
                 f"duration_sec={self._disturbance_duration_sec:.2f} "
                 f"body={body_label} "
-                f"force_xyz={self._disturbance_force_xyz} "
-                f"torque_xyz={self._disturbance_torque_xyz} "
-                f"is_global={self._disturbance_is_global}",
+                f"frame_mode={self._disturbance_frame_mode} "
+                f"configured_force_xyz={self._disturbance_force_xyz} "
+                f"configured_torque_xyz={self._disturbance_torque_xyz} "
+                f"applied_force_xyz={self._disturbance_applied_force_xyz} "
+                f"applied_torque_xyz={self._disturbance_applied_torque_xyz} "
+                f"is_global={self._disturbance_is_global} "
+                f"sync_marker={self._disturbance_sync_marker_path or 'disabled'}",
                 flush=True,
             )
 
@@ -185,8 +238,8 @@ class StandaloneDirectWorld:
         forces = self.robot.data.root_pos_w.new_zeros((1, body_count, 3))
         torques = self.robot.data.root_pos_w.new_zeros((1, body_count, 3))
         if active:
-            fx, fy, fz = self._disturbance_force_xyz
-            tx, ty, tz = self._disturbance_torque_xyz
+            fx, fy, fz = self._disturbance_applied_force_xyz
+            tx, ty, tz = self._disturbance_applied_torque_xyz
             forces[:, self._disturbance_body_index, 0] = fx
             forces[:, self._disturbance_body_index, 1] = fy
             forces[:, self._disturbance_body_index, 2] = fz
@@ -206,14 +259,42 @@ class StandaloneDirectWorld:
         if not self._disturbance_enabled or self._disturbance_body_index is None or self._disturbance_completed:
             return
         elapsed_sec = self._step_count * self.sim_dt
-        if self._disturbance_start_elapsed_sec <= elapsed_sec < self._disturbance_end_elapsed_sec:
+        if (
+            self._disturbance_control_active_elapsed_sec is None
+            and self._disturbance_sync_marker_path
+            and Path(self._disturbance_sync_marker_path).exists()
+        ):
+            self._disturbance_control_active_elapsed_sec = elapsed_sec
+            print(
+                "[DISTURBANCE_SYNC] "
+                f"control_active_elapsed_sec={elapsed_sec:.3f} "
+                f"marker={self._disturbance_sync_marker_path}",
+                flush=True,
+            )
+
+        active_window_start = self._disturbance_start_elapsed_sec
+        if (
+            self._disturbance_start_after_control_active_sec >= 0.0
+            and self._disturbance_control_active_elapsed_sec is not None
+        ):
+            active_window_start = (
+                self._disturbance_control_active_elapsed_sec
+                + self._disturbance_start_after_control_active_sec
+            )
+        active_window_end = active_window_start + self._disturbance_duration_sec
+
+        if active_window_start <= elapsed_sec < active_window_end:
             if not self._disturbance_active:
                 print(
                     "[DISTURBANCE_START] "
                     f"elapsed_sec={elapsed_sec:.3f} "
+                    f"window_start_sec={active_window_start:.3f} "
                     f"body={self._disturbance_body_name} "
-                    f"force_xyz={self._disturbance_force_xyz} "
-                    f"torque_xyz={self._disturbance_torque_xyz} "
+                    f"frame_mode={self._disturbance_frame_mode} "
+                    f"configured_force_xyz={self._disturbance_force_xyz} "
+                    f"configured_torque_xyz={self._disturbance_torque_xyz} "
+                    f"applied_force_xyz={self._disturbance_applied_force_xyz} "
+                    f"applied_torque_xyz={self._disturbance_applied_torque_xyz} "
                     f"is_global={self._disturbance_is_global}",
                     flush=True,
                 )
@@ -225,6 +306,7 @@ class StandaloneDirectWorld:
             print(
                 "[DISTURBANCE_END] "
                 f"elapsed_sec={elapsed_sec:.3f} "
+                f"window_end_sec={active_window_end:.3f} "
                 f"body={self._disturbance_body_name}",
                 flush=True,
             )

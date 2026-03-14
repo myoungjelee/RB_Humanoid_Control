@@ -5,51 +5,75 @@ shell_command_before:
   - export BASE="$HOME/Projects/RB_Humanoid_Control/logs/sim2real/m8/$RUN_ID"
   - export SCENARIO_PATH="${SCENARIO_PATH:?Set SCENARIO_PATH before tmuxp load}"
   - export RESULT_LABEL="${RESULT_LABEL:?Set RESULT_LABEL (balance_off/balance_on) before tmuxp load}"
+  - export ENABLE_TILT_FEEDBACK="${ENABLE_TILT_FEEDBACK:?Set ENABLE_TILT_FEEDBACK (true/false) before tmuxp load}"
   - export CAPTURE_MAX_SEC="${CAPTURE_MAX_SEC:-120}"
   - export POST_DIST_CAPTURE_SEC="${POST_DIST_CAPTURE_SEC:-15}"
   - export AUTO_KILL_AFTER_CAPTURE="${AUTO_KILL_AFTER_CAPTURE:-1}"
-  - mkdir -p "$BASE/m8/$RESULT_LABEL"
+  - export DISTURBANCE_SYNC_MARKER="$BASE/$RESULT_LABEL/control_active.marker"
+  - mkdir -p "$BASE/$RESULT_LABEL"
+  - rm -f "$DISTURBANCE_SYNC_MARKER"
 windows:
   - window_name: m8_disturb
     layout: main-vertical
     panes:
       - shell_command:
           - cd /home/leemou/Projects/RB_Humanoid_Control
-          - python main.py --phase m8_disturb 2>&1 | tee "$BASE/m8/$RESULT_LABEL/isaac.log"
-          # - python main.py --phase m8_disturb --headless 2>&1 | tee "$BASE/m8/$RESULT_LABEL/isaac.log"
+          - python main.py --phase m8_disturb 2>&1 | tee "$BASE/$RESULT_LABEL/isaac.log"
+          # - python main.py --phase m8_disturb --headless 2>&1 | tee "$BASE/$RESULT_LABEL/isaac.log"
       - shell_command:
           - cd /home/leemou/Projects/RB_Humanoid_Control/ros2_ws
           - source /opt/ros/humble/setup.bash
           - source install/setup.bash
-          - echo "[RUN] launching M8 disturbance comparison label=${RESULT_LABEL}"
-          - timeout "$CAPTURE_MAX_SEC" ros2 launch rb_controller controller.launch.py params_file:="$SCENARIO_PATH" 2>&1 | tee "$BASE/m8/$RESULT_LABEL/m8_disturb.log"
+          - echo "[RUN] launching M8 disturbance comparison label=${RESULT_LABEL} enable_tilt_feedback=${ENABLE_TILT_FEEDBACK}"
+          - timeout "$CAPTURE_MAX_SEC" ros2 launch rb_controller controller.launch.py params_file:="$SCENARIO_PATH" enable_tilt_feedback_override:="$ENABLE_TILT_FEEDBACK" 2>&1 | tee "$BASE/$RESULT_LABEL/m8_disturb.log"
           - exec bash
       - shell_command:
           - echo "[WAIT] waiting for controller start log"
-          - until rg -q "rb_controller started" "$BASE/m8/$RESULT_LABEL/m8_disturb.log" 2>/dev/null; do sleep 1; done
+          - until rg -q "rb_controller started" "$BASE/$RESULT_LABEL/m8_disturb.log" 2>/dev/null; do sleep 1; done
           - echo "[WAIT] waiting for CONTROL_ACTIVE (max ${CAPTURE_MAX_SEC}s)"
-          - 'for i in $(seq 1 "$CAPTURE_MAX_SEC"); do if rg -q "\[SYNC\] CONTROL_ACTIVE" "$BASE/m8/$RESULT_LABEL/m8_disturb.log" 2>/dev/null; then echo "[EVENT] control active detected"; break; fi; sleep 1; done'
+          - 'for i in $(seq 1 "$CAPTURE_MAX_SEC"); do if rg -q "\[SYNC\] CONTROL_ACTIVE" "$BASE/$RESULT_LABEL/m8_disturb.log" 2>/dev/null; then echo "[EVENT] control active detected"; touch "$DISTURBANCE_SYNC_MARKER"; break; fi; sleep 1; done'
           - echo "[WAIT] waiting for DISTURBANCE_START in isaac log (max ${CAPTURE_MAX_SEC}s)"
-          - 'for i in $(seq 1 "$CAPTURE_MAX_SEC"); do if rg -q "\[DISTURBANCE_START\]" "$BASE/m8/$RESULT_LABEL/isaac.log" 2>/dev/null; then echo "[EVENT] disturbance start detected"; break; fi; sleep 1; done'
-          - 'if ! rg -q "\[DISTURBANCE_START\]" "$BASE/m8/$RESULT_LABEL/isaac.log" 2>/dev/null; then echo "[FALLBACK] no disturbance marker within ${CAPTURE_MAX_SEC}s"; fi'
+          - 'for i in $(seq 1 "$CAPTURE_MAX_SEC"); do if rg -q "\[DISTURBANCE_START\]" "$BASE/$RESULT_LABEL/isaac.log" 2>/dev/null; then echo "[EVENT] disturbance start detected"; break; fi; sleep 1; done'
+          - 'if ! rg -q "\[DISTURBANCE_START\]" "$BASE/$RESULT_LABEL/isaac.log" 2>/dev/null; then echo "[FALLBACK] no disturbance marker within ${CAPTURE_MAX_SEC}s"; fi'
+          - 'export DIST_LOOP_COUNT_BEFORE=$(rg -c "loop_stats" "$BASE/$RESULT_LABEL/m8_disturb.log" 2>/dev/null || echo 0)'
           - echo "[WAIT] capturing ${POST_DIST_CAPTURE_SEC}s window after disturbance start"
           - 'sleep "$POST_DIST_CAPTURE_SEC"'
-          - rg "rb_controller started|rb_safety started|tilt_feedback|imu_frame_mode|\[SYNC\] CONTROL_ACTIVE" "$BASE/m8/$RESULT_LABEL/m8_disturb.log" | head -n 20 | tee "$BASE/m8/$RESULT_LABEL/start.txt"
-          - 'if rg -q "\[FALL_EVENT\]" "$BASE/m8/$RESULT_LABEL/isaac.log" 2>/dev/null; then rg "\[FALL_EVENT\]" "$BASE/m8/$RESULT_LABEL/isaac.log" | tail -n 1 | tee "$BASE/m8/$RESULT_LABEL/fall_event.txt"; else echo "[NO_FALL_EVENT] post_disturbance_capture_sec=${POST_DIST_CAPTURE_SEC}" | tee "$BASE/m8/$RESULT_LABEL/fall_event.txt"; fi'
-          - 'echo "[ISAAC]" > "$BASE/m8/$RESULT_LABEL/sync_markers.txt"'
-          - 'rg "\[SYNC\]|\[DISTURBANCE_(START|END)\]|\[FALL_EVENT\]" "$BASE/m8/$RESULT_LABEL/isaac.log" >> "$BASE/m8/$RESULT_LABEL/sync_markers.txt" || true'
-          - 'echo "[CONTROLLER]" >> "$BASE/m8/$RESULT_LABEL/sync_markers.txt"'
-          - 'rg "\[SYNC\]|rb_controller started|rb_safety started" "$BASE/m8/$RESULT_LABEL/m8_disturb.log" >> "$BASE/m8/$RESULT_LABEL/sync_markers.txt" || true'
-          - 'cat "$BASE/m8/$RESULT_LABEL/sync_markers.txt"'
-          - 'if rg -q "safety active: reason=" "$BASE/m8/$RESULT_LABEL/m8_disturb.log" 2>/dev/null; then rg "safety active: reason=" "$BASE/m8/$RESULT_LABEL/m8_disturb.log" | sed -E ''s/.*reason=([A-Z_]+).*/\\1/'' | sort | uniq -c | tee "$BASE/m8/$RESULT_LABEL/reason_count.txt"; else echo "[NO_SAFETY_REASON] post_disturbance_capture_sec=${POST_DIST_CAPTURE_SEC}" | tee "$BASE/m8/$RESULT_LABEL/reason_count.txt"; fi'
-          - 'awk ''BEGIN{flag=0;count=0} /\[SYNC\] CONTROL_ACTIVE/{flag=1; next} flag && /loop_stats/ {print; count++; if (count>=12) exit}'' "$BASE/m8/$RESULT_LABEL/m8_disturb.log" > "$BASE/m8/$RESULT_LABEL/loop_post_sync.txt"'
-          - 'if [ ! -s "$BASE/m8/$RESULT_LABEL/loop_post_sync.txt" ]; then rg "loop_stats" "$BASE/m8/$RESULT_LABEL/m8_disturb.log" | head -n 12 > "$BASE/m8/$RESULT_LABEL/loop_post_sync.txt"; fi'
-          - 'awk ''BEGIN{flag=0;count=0} /\[DISTURBANCE_START\]/{flag=1; next} flag && /loop_stats/ {print; count++; if (count>=12) exit}'' "$BASE/m8/$RESULT_LABEL/m8_disturb.log" > "$BASE/m8/$RESULT_LABEL/loop_after_disturb.txt"'
-          - 'if [ ! -s "$BASE/m8/$RESULT_LABEL/loop_after_disturb.txt" ]; then rg "loop_stats" "$BASE/m8/$RESULT_LABEL/m8_disturb.log" | tail -n 12 > "$BASE/m8/$RESULT_LABEL/loop_after_disturb.txt"; fi'
-          - 'cat "$BASE/m8/$RESULT_LABEL/loop_after_disturb.txt"'
-          - 'awk ''BEGIN{maxr=0;maxp=0} {for(i=1;i<=NF;i++){if($i ~ /^tilt_r=/){split($i,a,"="); v=a[2]+0; if(v<0)v=-v; if(v>maxr)maxr=v} if($i ~ /^tilt_p=/){split($i,a,"="); v=a[2]+0; if(v<0)v=-v; if(v>maxp)maxp=v}} END{printf("peak_abs_tilt_r_after_disturb=%.3f\npeak_abs_tilt_p_after_disturb=%.3f\n", maxr, maxp)}'' "$BASE/m8/$RESULT_LABEL/loop_after_disturb.txt" | tee "$BASE/m8/$RESULT_LABEL/disturb_kpi.txt"'
-          - 'rg "loop_stats" "$BASE/m8/$RESULT_LABEL/m8_disturb.log" | tail -n 12 > "$BASE/m8/$RESULT_LABEL/loop_before_end.txt"'
-          - 'cat "$BASE/m8/$RESULT_LABEL/loop_before_end.txt"'
+          - rg "rb_controller started|rb_safety started|tilt_feedback|imu_frame_mode|\[SYNC\] CONTROL_ACTIVE" "$BASE/$RESULT_LABEL/m8_disturb.log" | head -n 20 | tee "$BASE/$RESULT_LABEL/start.txt"
+          - 'if rg -q "\[FALL_EVENT\]" "$BASE/$RESULT_LABEL/isaac.log" 2>/dev/null; then rg "\[FALL_EVENT\]" "$BASE/$RESULT_LABEL/isaac.log" | tail -n 1 | tee "$BASE/$RESULT_LABEL/fall_event.txt"; else echo "[NO_FALL_EVENT] post_disturbance_capture_sec=${POST_DIST_CAPTURE_SEC}" | tee "$BASE/$RESULT_LABEL/fall_event.txt"; fi'
+          - 'echo "[ISAAC]" > "$BASE/$RESULT_LABEL/sync_markers.txt"'
+          - 'rg "\[SYNC\]|\[DISTURBANCE_(START|END)\]|\[FALL_EVENT\]" "$BASE/$RESULT_LABEL/isaac.log" >> "$BASE/$RESULT_LABEL/sync_markers.txt" || true'
+          - 'echo "[CONTROLLER]" >> "$BASE/$RESULT_LABEL/sync_markers.txt"'
+          - 'rg "\[SYNC\]|rb_controller started|rb_safety started" "$BASE/$RESULT_LABEL/m8_disturb.log" >> "$BASE/$RESULT_LABEL/sync_markers.txt" || true'
+          - 'cat "$BASE/$RESULT_LABEL/sync_markers.txt"'
+          - 'if rg -q "safety active: reason=" "$BASE/$RESULT_LABEL/m8_disturb.log" 2>/dev/null; then rg "safety active: reason=" "$BASE/$RESULT_LABEL/m8_disturb.log" | sed -E ''s/.*reason=([A-Z_]+).*/\\1/'' | sort | uniq -c | tee "$BASE/$RESULT_LABEL/reason_count.txt"; else echo "[NO_SAFETY_REASON] post_disturbance_capture_sec=${POST_DIST_CAPTURE_SEC}" | tee "$BASE/$RESULT_LABEL/reason_count.txt"; fi'
+          - 'awk ''BEGIN{flag=0;count=0} /\[SYNC\] CONTROL_ACTIVE/{flag=1; next} flag && /loop_stats/ {print; count++; if (count>=12) exit}'' "$BASE/$RESULT_LABEL/m8_disturb.log" > "$BASE/$RESULT_LABEL/loop_post_sync.txt"'
+          - 'if [ ! -s "$BASE/$RESULT_LABEL/loop_post_sync.txt" ]; then rg "loop_stats" "$BASE/$RESULT_LABEL/m8_disturb.log" | head -n 12 > "$BASE/$RESULT_LABEL/loop_post_sync.txt"; fi'
+          - 'rg "loop_stats" "$BASE/$RESULT_LABEL/m8_disturb.log" | tail -n "+$((DIST_LOOP_COUNT_BEFORE + 1))" | head -n 12 > "$BASE/$RESULT_LABEL/loop_after_disturb.txt"'
+          - 'if [ ! -s "$BASE/$RESULT_LABEL/loop_after_disturb.txt" ]; then rg "loop_stats" "$BASE/$RESULT_LABEL/m8_disturb.log" | tail -n 12 > "$BASE/$RESULT_LABEL/loop_after_disturb.txt"; fi'
+          - 'cat "$BASE/$RESULT_LABEL/loop_after_disturb.txt"'
+          - |
+            python3 - "$BASE/$RESULT_LABEL/loop_after_disturb.txt" <<'PY' | tee "$BASE/$RESULT_LABEL/disturb_kpi.txt"
+            import re
+            import sys
+
+            path = sys.argv[1]
+            max_r = 0.0
+            max_p = 0.0
+
+            with open(path, "r", encoding="utf-8") as f:
+                for line in f:
+                    m_r = re.search(r"tilt_r=([-+]?[0-9]*\.?[0-9]+)", line)
+                    m_p = re.search(r"tilt_p=([-+]?[0-9]*\.?[0-9]+)", line)
+                    if m_r:
+                        max_r = max(max_r, abs(float(m_r.group(1))))
+                    if m_p:
+                        max_p = max(max_p, abs(float(m_p.group(1))))
+
+            print(f"peak_abs_tilt_r_after_disturb={max_r:.3f}")
+            print(f"peak_abs_tilt_p_after_disturb={max_p:.3f}")
+            PY
+          - 'rg "loop_stats" "$BASE/$RESULT_LABEL/m8_disturb.log" | tail -n 12 > "$BASE/$RESULT_LABEL/loop_before_end.txt"'
+          - 'cat "$BASE/$RESULT_LABEL/loop_before_end.txt"'
           - echo "[CAPTURE] m8 balance comparison label=${RESULT_LABEL} sync_markers + reason_count + loop windows + disturb_kpi"
           - 'if [ "${AUTO_KILL_AFTER_CAPTURE}" = "1" ]; then echo "[SESSION] auto-kill session after disturbance capture"; tmux kill-session -t rb_m8_disturb; fi'
           - exec bash
