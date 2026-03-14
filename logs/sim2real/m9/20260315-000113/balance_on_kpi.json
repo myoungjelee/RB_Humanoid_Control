@@ -1,0 +1,59 @@
+{
+  "disturb_applied_force_xyz": [
+    0.0,
+    113.0,
+    0.0
+  ],
+  "disturb_configured_force_xyz": [
+    113.0,
+    0.0,
+    0.0
+  ],
+  "disturb_elapsed_sec": 3.125,
+  "disturb_frame_mode": "g1_imu_link",
+  "disturb_is_global": false,
+  "disturb_target_body": "torso_link",
+  "disturb_window_end_sec": 3.225,
+  "disturb_window_start_sec": 3.125,
+  "dt_max": 0.005036,
+  "dt_mean": 0.005,
+  "dt_p95": 0.005008,
+  "enable_tilt_feedback": true,
+  "fall_elapsed_sec": null,
+  "first_safety_reason": null,
+  "imu_frame_mode": "g1_imu_link",
+  "label": "balance_on",
+  "milestone": "m8",
+  "miss_total": 0,
+  "peak_abs_tilt_p_after_disturb": 0.101,
+  "peak_abs_tilt_r_after_disturb": 0.046,
+  "post_disturbance_capture_sec": 15.0,
+  "reason_counts": {},
+  "run_id": "20260315-000113",
+  "sources": {
+    "disturb_kpi": "/home/leemou/Projects/RB_Humanoid_Control/logs/sim2real/m8/20260315-000113/balance_on/disturb_kpi.txt",
+    "fall_event": "/home/leemou/Projects/RB_Humanoid_Control/logs/sim2real/m8/20260315-000113/balance_on/fall_event.txt",
+    "reason_count": "/home/leemou/Projects/RB_Humanoid_Control/logs/sim2real/m8/20260315-000113/balance_on/reason_count.txt",
+    "start": "/home/leemou/Projects/RB_Humanoid_Control/logs/sim2real/m8/20260315-000113/balance_on/start.txt",
+    "sync_markers": "/home/leemou/Projects/RB_Humanoid_Control/logs/sim2real/m8/20260315-000113/balance_on/sync_markers.txt"
+  },
+  "stand_kd": 3.5,
+  "stand_kp": 50.0,
+  "stand_limit": 18.0,
+  "stand_q_ref_trim_hint": {
+    "left_ankle_pitch_joint": 0.005,
+    "left_hip_pitch_joint": 0.005,
+    "right_ankle_pitch_joint": 0.005,
+    "right_hip_pitch_joint": 0.005
+  },
+  "survival_after_disturb_sec": 15.0,
+  "survived": true,
+  "tilt_apply_mode": "qref_bias",
+  "tilt_kd_pitch": 1.6,
+  "tilt_kd_roll": 0.4,
+  "tilt_kp_pitch": 8.0,
+  "tilt_kp_roll": 2.0,
+  "tilt_qref_bias_abs_max": 0.03,
+  "tilt_weight_pitch_raw": "0.80/0.70/0.15/0.05",
+  "tilt_weight_roll_raw": "0.70/0.30/0.00"
+}

@@ -164,8 +164,8 @@ Stage1(`reports/stage1/*`)은 baseline 자산으로 유지하고, 본 문서는 
   - `fall_event.txt`에 `[NO_FALL_EVENT] capture_window_sec=60` 반복 확인
   - `60~90초` 이상 hold도 반복 관찰
 - 현재 대표 증빙:
-  - `logs/sim2real/_legacy/20260314-121949_m5_stand_sanity_qrefv7/m5/fall_event.txt`
-  - `logs/sim2real/_legacy/20260314-121949_m5_stand_sanity_qrefv7/m5/sync_markers.txt`
+  - `logs/sim2real/m5/20260314-121949_m5_stand_sanity_qrefv7/m5/fall_event.txt`
+  - `logs/sim2real/m5/20260314-121949_m5_stand_sanity_qrefv7/m5/sync_markers.txt`
   - `ros2_ws/src/rb_controller/config/scenarios/stand_pd_sanity.yaml`
 
 ### M6: evidence / artifact infrastructure
@@ -190,9 +190,9 @@ Stage1(`reports/stage1/*`)은 baseline 자산으로 유지하고, 본 문서는 
   - `[NO_FALL_EVENT]`
   - `[NO_SAFETY_REASON]`
 - 대표 증빙:
-  - `logs/sim2real/_legacy/20260314-133954_m7_stand_safecheck/m7/fall_event.txt`
-  - `logs/sim2real/_legacy/20260314-133954_m7_stand_safecheck/m7/reason_count.txt`
-  - `logs/sim2real/_legacy/20260314-133954_m7_stand_safecheck/m7/sync_markers.txt`
+  - `logs/sim2real/m7/20260314-133954_m7_stand_safecheck/m7/fall_event.txt`
+  - `logs/sim2real/m7/20260314-133954_m7_stand_safecheck/m7/reason_count.txt`
+  - `logs/sim2real/m7/20260314-133954_m7_stand_safecheck/m7/sync_markers.txt`
 
 ### M8: disturbance A/B
 - 구현:
@@ -227,7 +227,7 @@ Stage1(`reports/stage1/*`)은 baseline 자산으로 유지하고, 본 문서는 
   - `logs/sim2real/m9/index.csv`
   가 자동 생성되도록 정리
 - 대표 증빙:
-  - `logs/sim2real/m9/20260314-184316/`
+  - `logs/sim2real/m9/20260315-000113/`
 
 ## 6) 현재 standing 해석
 - 기존 문제:

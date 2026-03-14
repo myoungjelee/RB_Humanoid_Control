@@ -1,0 +1,5 @@
+[ISAAC]
+[SYNC] FIRST_SIM_STEP sim_elapsed_sec=0.005
+[CONTROLLER]
+[rb_controller_node-1] [INFO] [1773458390.793822174] [rb_controller]: rb_controller started: rate=200.0Hz expected_dt=0.005000s input=/rb/joint_states output=/rb/command_raw joint_names(init)=0 signal_mode=stand_pd target_joint=torso_joint amp=0.000 freq=0.500 stand_kp=60.000 stand_kd=4.000 stand_limit=18.000
+[rb_controller_node-1] [INFO] [1773458404.503699677] [rb_controller]: [SYNC] CONTROL_ACTIVE joint_count=37 imu_raw_r=0.000 imu_raw_p=0.000 tilt_r=0.000 tilt_p=0.000 imu_frame_mode=g1_imu_link

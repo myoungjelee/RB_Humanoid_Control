@@ -1,0 +1,1 @@
+[NO_SAFETY_REASON] capture_window_sec=60

@@ -1,0 +1,1 @@
+[NO_FALL_EVENT] capture_window_sec=60

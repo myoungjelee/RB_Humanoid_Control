@@ -1,0 +1,1 @@
+[FALL_EVENT] elapsed_sec=5.640 trigger=torso:torso_link pelvis_z=0.398/0.300 torso_z=0.398/0.400

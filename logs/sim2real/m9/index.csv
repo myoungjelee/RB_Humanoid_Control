@@ -1,0 +1,7 @@
+run_id,force_x,force_y,force_z,duration_sec,off_survived,on_survived,off_fall_elapsed_sec,on_fall_elapsed_sec,off_peak_tilt_r,on_peak_tilt_r,off_peak_tilt_p,on_peak_tilt_p,result_tag
+20260314-184316,113.0,0.0,0.0,0.1,False,True,5.82,,0.061,0.043,0.124,0.098,pass
+20260314-201802,113.0,0.0,0.0,0.1,False,False,5.895,5.04,0.023,0.063,0.102,0.438,fail
+20260314-202655,113.0,0.0,0.0,0.1,False,True,5.715,,0.06,0.041,0.15,0.095,pass
+20260314-203442,113.0,0.0,0.0,0.1,True,True,,,0.036,0.039,0.093,0.092,partial
+20260314-203834,114.0,0.0,0.0,0.1,False,False,5.825,4.78,0.052,0.06,0.123,1.282,fail
+20260315-000113,113.0,0.0,0.0,0.1,False,True,6.435,,0.082,0.046,0.115,0.101,pass
