@@ -5,7 +5,7 @@
 Stage1(`reports/stage1/*`)은 baseline 자산으로 유지하고, 본 문서는 ROS2 메인 트랙이 **왜 이런 순서로 진행됐는지**, **각 단계에서 무엇을 구현했고 무엇으로 검증했는지**, **현재 어디까지 왔는지**를 기록합니다.
 
 ## 2) 현재 단계
-- 상태: M0 완료, M1 완료, M2 완료, M3 완료, M4 완료, M5 standing hold 확보, M6 증빙 인프라 완료, M7 safety-on standing 완료, M8 대표 disturbance A/B 확보
+- 상태: M0 완료, M1 완료, M2 완료, M3 완료, M4 완료, M5 standing hold 확보, M6 증빙 인프라 완료, M7 safety-on standing 완료, M8 대표 disturbance A/B 확보, M9 KPI 자동화 완료
 - 현재 핵심 성과:
   - controller-only no-disturbance standing hold 확보
   - standing 실패의 핵심 원인을 `IMU frame interpretation mismatch`로 분리
@@ -13,7 +13,6 @@ Stage1(`reports/stage1/*`)은 baseline 자산으로 유지하고, 본 문서는 
   - safety-on 기준 `CONTROL_ACTIVE` 이후 60초 no-fall / no-safety-reason 확인
   - `113N x 0.10s` sagittal torso impulse 기준 `OFF 3/3 fall`, `ON 3/3 no-fall` 확인
 - 다음 단계:
-  - KPI 자동화
   - 포트폴리오 패키징
 
 ## 3) 왜 이 순서로 진행했는가
@@ -213,6 +212,23 @@ Stage1(`reports/stage1/*`)은 baseline 자산으로 유지하고, 본 문서는 
   - `logs/sim2real/m8/20260314-184442/`
   - `logs/sim2real/m8/20260314-184609/`
 
+### M9: KPI/report automation
+- 구현:
+  - `extract_m8_kpi.py` 후처리 extractor 추가
+  - `run_m8_pair.sh`, `run_m9_kpi.sh`, `run_m8_and_m9.sh`로 실행 레이어 분리
+  - `M8 raw -> M9 summary` 구조 정리
+- 왜 중요했나:
+  - raw log만으로는 run-to-run 비교가 불편하고, 포트폴리오/면접에서 바로 읽을 수 있는 요약 문서가 필요했기 때문
+- 결과:
+  - `logs/sim2real/m9/<run_id>/balance_off_kpi.json`
+  - `logs/sim2real/m9/<run_id>/balance_on_kpi.json`
+  - `logs/sim2real/m9/<run_id>/comparison.json`
+  - `logs/sim2real/m9/<run_id>/summary.md`
+  - `logs/sim2real/m9/index.csv`
+  가 자동 생성되도록 정리
+- 대표 증빙:
+  - `logs/sim2real/m9/20260314-184316/`
+
 ## 6) 현재 standing 해석
 - 기존 문제:
   - controller가 `imu_link` raw orientation을 이미 body/control frame에 정렬된 값처럼 사용
@@ -226,8 +242,8 @@ Stage1(`reports/stage1/*`)은 baseline 자산으로 유지하고, 본 문서는 
   - `imu_frame_mode=g1_imu_link`
 
 ## 7) 현재 남은 작업
-1. KPI/요약 리포트 자동화
-2. 포트폴리오 패키징 마감
+1. 포트폴리오 패키징 마감
+2. `reason_count.txt` raw parsing 정리
 3. 이후 robustness margin 확장
 
 ## 8) 아티팩트 경로
@@ -242,3 +258,8 @@ Stage1(`reports/stage1/*`)은 baseline 자산으로 유지하고, 본 문서는 
   - `reports/sim2real/overview.md`
   - `reports/sim2real/ONE_PAGER.md`
   - `STATUS.md`
+- M9 요약 경로:
+  - `logs/sim2real/m9/<run_id>/balance_off_kpi.json`
+  - `logs/sim2real/m9/<run_id>/balance_on_kpi.json`
+  - `logs/sim2real/m9/<run_id>/comparison.json`
+  - `logs/sim2real/m9/<run_id>/summary.md`

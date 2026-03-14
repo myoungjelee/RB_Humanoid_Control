@@ -384,6 +384,15 @@ run 결과를 자동 요약하고 run 간 비교 가능한 형태로 만든다.
 
 실험 결과를 숫자로 비교하고 자동 보고서로 남길 수 있는가
 
+현재 구현 범위(2026-03-14 기준)
+
+- M8 raw를 읽는 후처리 extractor
+- `balance_off_kpi.json`
+- `balance_on_kpi.json`
+- `comparison.json`
+- `summary.md`
+- `logs/sim2real/m9/index.csv`
+
 ---
 
 # M10 — Portfolio Packaging
@@ -608,7 +617,6 @@ Sensors
 
 현재 우선순위는 아래 순서로 고정한다.
 
-1. M8 — Disturbance A/B
-2. M9 — KPI Automation
-3. M10 — Portfolio Packaging
-4. 이후 M11+ 확장
+1. M10 — Portfolio Packaging
+2. small cleanup — raw reason parsing / runner polish
+3. 이후 M11+ 확장

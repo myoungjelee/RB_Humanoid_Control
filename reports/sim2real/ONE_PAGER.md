@@ -9,6 +9,7 @@ Isaac Sim과 실기체에서 재사용 가능한 ROS2 제어 스택 인터페이
 - `rb_controller` C++ 200Hz control loop + dt/jitter 관측
 - `rb_safety` safety gating
 - sync marker 기반 로그/실험 오케스트레이션
+- M8 raw -> M9 summary 자동 요약 경로
 - standing 디버깅용 observer/debug 모듈화
 - safety-on standing 검증용 시나리오와 증빙 아티팩트 경로
 
@@ -33,6 +34,7 @@ Isaac Sim과 실기체에서 재사용 가능한 ROS2 제어 스택 인터페이
 | M6 | 증빙/아티팩트 인프라 | `fall_event.txt`, `sync_markers.txt`, `loop_post_sync.txt`, `loop_before_fall.txt` | [overview.md](overview.md), [STATUS](../../STATUS.md) |
 | M7 | safety-on standing 재통합 | `CONTROL_ACTIVE` 기준 60초 `NO_FALL_EVENT`, `NO_SAFETY_REASON` | [stand_pd_safecheck.yaml](../../ros2_ws/src/rb_controller/config/scenarios/stand_pd_safecheck.yaml), [m7_stand_safecheck.yaml](../../ops/tmuxp/m7_stand_safecheck.yaml) |
 | M8 | disturbance A/B | `113N x 0.10s`에서 `OFF 3/3 fall`, `ON 3/3 no-fall` | [stand_pd_balance_base.yaml](../../ros2_ws/src/rb_controller/config/scenarios/stand_pd_balance_base.yaml), [run_m8_pair.sh](../../ops/run_m8_pair.sh) |
+| M9 | KPI/report 자동화 | `comparison.json`, `summary.md`, `m9/index.csv` 자동 생성 | [extract_m8_kpi.py](../../scripts/sim2real/extract_m8_kpi.py), [run_m9_kpi.sh](../../ops/run_m9_kpi.sh) |
 
 ## M5에서 실제로 해결한 것
 - 초기에는 no-disturbance standing도 `1~2초` 안쪽 전방 붕괴
@@ -69,7 +71,8 @@ Isaac Sim과 실기체에서 재사용 가능한 ROS2 제어 스택 인터페이
 - M6 증빙/아티팩트 인프라 완료
 - M7 safety-on standing 완료
 - M8 대표 disturbance A/B 확보
-- 다음 단계: KPI 자동화 -> 포트폴리오 패키징
+- M9 KPI/report 자동화 완료
+- 다음 단계: 포트폴리오 패키징
 
 ## 핵심 링크
 - 랜딩 페이지: [README.md](../../README.md)

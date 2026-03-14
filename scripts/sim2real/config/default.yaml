@@ -180,7 +180,7 @@ sim2real:
       duration_sec: 0.10
       body_name_candidates: [torso_link, torso, base_link]
       frame_mode: g1_imu_link
-      force_xyz: [114.0, 0.0, 0.0]
+      force_xyz: [113.0, 0.0, 0.0]
       torque_xyz: [0.0, 0.0, 0.0]
       is_global: false
     enable_ros2_bridge: true
