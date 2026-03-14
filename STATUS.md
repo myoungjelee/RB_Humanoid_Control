@@ -187,3 +187,8 @@
 - `AGENTS.md`의 문서 운영 규칙도 보강했다. `overview`는 milestone 완료/원인 해결 직후, `README`는 외부 공개용 상태 변화 시, `ONE_PAGER`는 `M5/M8/M10` 같은 체크포인트에서 갱신하도록 타이밍 기준을 명시했다.
 - `ROADMAP_SIMPLE.md`의 milestone 제목도 한글 중심으로 정리했다. `M0 인터페이스 고정`, `M5 스탠딩 안정화`, `M8 외란 A/B 비교`처럼 한눈에 훑기 쉬운 형태로 맞췄다.
 - `ROADMAP_SIMPLE.md`를 표 중심 요약 문서로 다시 배치했다. `M0~M6`, `M7~M10`, `M11~M16`을 각각 표 1개로 묶어 `무엇 / 왜 / 목표`를 칸 안에서 바로 비교할 수 있게 정리했다.
+- `M7` safety 재통합용 경로를 분리했다. `stand_pd_safecheck.yaml`은 현재 standing baseline에 `safety_enabled=true`, `effort_abs_max_default=18.0`, `tilt_limit=0.6rad`, `velocity_limit(default/ankle)=8/12rad/s`를 얹은 전용 시나리오이고, `ops/tmuxp/m7_stand_safecheck.yaml`은 headless 60초 관측창 동안 `reason_count/sync_markers/loop_post_sync/loop_before_fall`를 자동 수집한다.
+- `VIDEO_CAPTURE_GUIDE.md`도 현재 milestone 체계로 다시 맞췄다. 예전 `M5 disturbance hook` 중심 구조를 버리고, `M5 standing hold -> M7 safety-on -> M8 disturbance A/B -> M9 KPI` 순서로 어떤 장면을 찍고 어떻게 편집할지 기준을 다시 정리했다.
+- `M7` safecheck 캡처 기준도 조정했다. `m7_stand_safecheck.yaml`은 이제 `FIRST_SIM_STEP`가 아니라 controller 로그의 `[SYNC] CONTROL_ACTIVE`를 관측창 시작점으로 삼아, “sim이 시작된 뒤 60초”가 아니라 “실제 제어가 붙은 뒤 60초”를 기준으로 safety-on standing을 해석한다.
+- `M4` safety 증빙도 보강한다. `velocity.yaml` + `ops/tmuxp/m4_velocity.yaml`을 추가해 팔 관절 하나를 빠르게 움직이는 전용 시나리오로 `reason=VELOCITY_LIMIT`를 재현하고, `reasons.txt`와 `loop_tail.txt`를 기존 M4 reason과 같은 방식으로 수집한다.
+- `M7`은 safety-on standing 기준으로 사실상 통과했다. `logs/sim2real/20260314-133954_m7_stand_safecheck/m7/`에서 `CONTROL_ACTIVE` 이후 60초 동안 `[NO_FALL_EVENT]`, `[NO_SAFETY_REASON]`를 확인했고, 이에 맞춰 `README/overview/ONE_PAGER/VIDEO_CAPTURE_GUIDE`를 M8 진입 전 상태로 다시 동기화했다.

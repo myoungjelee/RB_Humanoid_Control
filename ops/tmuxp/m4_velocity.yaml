@@ -1,0 +1,28 @@
+session_name: rb_m4_velocity
+start_directory: /home/leemou/Projects/RB_Humanoid_Control
+shell_command_before:
+  - export RUN_ID="${RUN_ID:?Set RUN_ID before tmuxp load}"
+  - export BASE="$HOME/Projects/RB_Humanoid_Control/logs/sim2real/$RUN_ID"
+  - mkdir -p "$BASE/m4/velocity"
+windows:
+  - window_name: m4_velocity
+    layout: main-vertical
+    panes:
+      - shell_command:
+          - cd /home/leemou/Projects/RB_Humanoid_Control
+          - python main.py --phase m5_stand 2>&1 | tee "$BASE/m4/velocity/isaac.log"
+      - shell_command:
+          - cd /home/leemou/Projects/RB_Humanoid_Control/ros2_ws
+          - source /opt/ros/humble/setup.bash
+          - source install/setup.bash
+          - echo "[WAIT] sleeping 15s for Isaac startup"
+          - sleep 15
+          - until timeout 1 ros2 topic echo --once /clock >/dev/null 2>&1; do echo "[WAIT] /clock not ready yet"; sleep 1; done
+          - ros2 launch rb_controller controller.launch.py params_file:=/home/leemou/Projects/RB_Humanoid_Control/ros2_ws/src/rb_controller/config/scenarios/velocity.yaml 2>&1 | tee "$BASE/m4/velocity/launch.log"
+      - shell_command:
+          - echo "[WAIT] sleeping 25s before log summary"
+          - sleep 25
+          - 'rg "safety active: reason=" "$BASE/m4/velocity/launch.log" | tee "$BASE/m4/velocity/reasons.txt"'
+          - rg "loop_stats" "$BASE/m4/velocity/launch.log" | tail -n 5 | tee "$BASE/m4/velocity/loop_tail.txt"
+          - echo "[CAPTURE] reason=VELOCITY_LIMIT visible"
+          - exec bash

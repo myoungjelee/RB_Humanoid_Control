@@ -1,0 +1,48 @@
+session_name: rb_m7_stand_safecheck
+start_directory: /home/leemou/Projects/RB_Humanoid_Control
+shell_command_before:
+  - export RUN_ID="${RUN_ID:?Set RUN_ID before tmuxp load}"
+  - export BASE="$HOME/Projects/RB_Humanoid_Control/logs/sim2real/$RUN_ID"
+  - export CAPTURE_MAX_SEC="${CAPTURE_MAX_SEC:-180}"
+  - export POST_SYNC_CAPTURE_SEC="${POST_SYNC_CAPTURE_SEC:-60}"
+  - export AUTO_KILL_AFTER_CAPTURE="${AUTO_KILL_AFTER_CAPTURE:-1}"
+  - mkdir -p "$BASE/m7"
+windows:
+  - window_name: m7_stand_safecheck
+    layout: main-vertical
+    panes:
+      - shell_command:
+          - cd /home/leemou/Projects/RB_Humanoid_Control
+          - python main.py --phase m5_stand 2>&1 | tee "$BASE/m7/isaac.log"
+          # - python main.py --phase m5_stand --headless 2>&1 | tee "$BASE/m7/isaac.log"
+      - shell_command:
+          - cd /home/leemou/Projects/RB_Humanoid_Control/ros2_ws
+          - source /opt/ros/humble/setup.bash
+          - source install/setup.bash
+          - echo "[RUN] launching controller+safety immediately; sync markers will align analysis later"
+          - timeout "$CAPTURE_MAX_SEC" ros2 launch rb_controller controller.launch.py params_file:=/home/leemou/Projects/RB_Humanoid_Control/ros2_ws/src/rb_controller/config/scenarios/stand_pd_safecheck.yaml 2>&1 | tee "$BASE/m7/m7_stand_safecheck.log"
+          - exec bash
+      - shell_command:
+          - echo "[WAIT] waiting for controller start log"
+          - until rg -q "rb_controller started" "$BASE/m7/m7_stand_safecheck.log" 2>/dev/null; do sleep 1; done
+          - echo "[WAIT] waiting for CONTROL_ACTIVE in controller log (max ${CAPTURE_MAX_SEC}s)"
+          - 'for i in $(seq 1 "$CAPTURE_MAX_SEC"); do if rg -q "\[SYNC\] CONTROL_ACTIVE" "$BASE/m7/m7_stand_safecheck.log" 2>/dev/null; then echo "[EVENT] control active detected"; break; fi; sleep 1; done'
+          - 'if ! rg -q "\[SYNC\] CONTROL_ACTIVE" "$BASE/m7/m7_stand_safecheck.log" 2>/dev/null; then echo "[FALLBACK] no CONTROL_ACTIVE within ${CAPTURE_MAX_SEC}s"; fi'
+          - echo "[WAIT] capturing ${POST_SYNC_CAPTURE_SEC}s window after CONTROL_ACTIVE"
+          - 'sleep "$POST_SYNC_CAPTURE_SEC"'
+          - rg "rb_controller started|rb_safety started|stand_control_joints|tilt_feedback|imu_frame_mode" "$BASE/m7/m7_stand_safecheck.log" | head -n 16 | tee "$BASE/m7/start.txt"
+          - 'if rg -q "\[FALL_EVENT\]" "$BASE/m7/isaac.log" 2>/dev/null; then rg "\[FALL_EVENT\]" "$BASE/m7/isaac.log" | tail -n 1 | tee "$BASE/m7/fall_event.txt"; else echo "[NO_FALL_EVENT] capture_window_sec=${POST_SYNC_CAPTURE_SEC}" | tee "$BASE/m7/fall_event.txt"; fi'
+          - 'echo "[ISAAC]" > "$BASE/m7/sync_markers.txt"'
+          - 'rg "\[SYNC\]|\[FALL_EVENT\]" "$BASE/m7/isaac.log" >> "$BASE/m7/sync_markers.txt" || true'
+          - 'echo "[CONTROLLER]" >> "$BASE/m7/sync_markers.txt"'
+          - 'rg "\[SYNC\]|rb_controller started|rb_safety started" "$BASE/m7/m7_stand_safecheck.log" >> "$BASE/m7/sync_markers.txt" || true'
+          - 'cat "$BASE/m7/sync_markers.txt"'
+          - 'if rg -q "safety active: reason=" "$BASE/m7/m7_stand_safecheck.log" 2>/dev/null; then rg "safety active: reason=" "$BASE/m7/m7_stand_safecheck.log" | sed -E ''s/.*reason=([A-Z_]+).*/\\1/'' | sort | uniq -c | tee "$BASE/m7/reason_count.txt"; else echo "[NO_SAFETY_REASON] capture_window_sec=${POST_SYNC_CAPTURE_SEC}" | tee "$BASE/m7/reason_count.txt"; fi'
+          - 'awk ''BEGIN{flag=0;count=0} /\[SYNC\] CONTROL_ACTIVE/{flag=1; next} flag && /loop_stats/ {print; count++; if (count>=12) exit}'' "$BASE/m7/m7_stand_safecheck.log" > "$BASE/m7/loop_post_sync.txt"'
+          - 'if [ ! -s "$BASE/m7/loop_post_sync.txt" ]; then rg "loop_stats" "$BASE/m7/m7_stand_safecheck.log" | head -n 12 > "$BASE/m7/loop_post_sync.txt"; fi'
+          - 'cat "$BASE/m7/loop_post_sync.txt"'
+          - 'rg "loop_stats" "$BASE/m7/m7_stand_safecheck.log" | tail -n 12 > "$BASE/m7/loop_before_fall.txt"'
+          - 'cat "$BASE/m7/loop_before_fall.txt"'
+          - echo "[CAPTURE] stand_pd_safecheck control_active + fixed_window + reason_count + sync_markers + loop windows"
+          - 'if [ "${AUTO_KILL_AFTER_CAPTURE}" = "1" ]; then echo "[SESSION] auto-kill session after fixed capture window"; tmux kill-session -t rb_m7_stand_safecheck; fi'
+          - exec bash

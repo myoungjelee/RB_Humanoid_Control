@@ -5,14 +5,15 @@
 Stage1(`reports/stage1/*`)은 baseline 자산으로 유지하고, 본 문서는 ROS2 메인 트랙이 **왜 이런 순서로 진행됐는지**, **각 단계에서 무엇을 구현했고 무엇으로 검증했는지**, **현재 어디까지 왔는지**를 기록합니다.
 
 ## 2) 현재 단계
-- 상태: M0 완료, M1 완료, M2 완료, M3 완료, M4 완료, M5 standing hold 확보
+- 상태: M0 완료, M1 완료, M2 완료, M3 완료, M4 완료, M5 standing hold 확보, M6 증빙 인프라 완료, M7 safety-on standing 완료
 - 현재 핵심 성과:
   - controller-only no-disturbance standing hold 확보
   - standing 실패의 핵심 원인을 `IMU frame interpretation mismatch`로 분리
   - observer 쪽 `imu_frame_mode=g1_imu_link` 보정으로 개선
+  - safety-on 기준 `CONTROL_ACTIVE` 이후 60초 no-fall / no-safety-reason 확인
 - 다음 단계:
-  - safety 재통합
   - disturbance A/B 비교
+  - KPI 자동화
 
 ## 3) 왜 이 순서로 진행했는가
 이 프로젝트는 처음부터 "잘 서는가?"를 바로 보는 대신, **실패 원인을 좁혀갈 수 있는 순서**로 구성했습니다.
@@ -109,6 +110,7 @@ Stage1(`reports/stage1/*`)은 baseline 자산으로 유지하고, 본 문서는 
   - `reports/sim2real/images/standalone_backend/m4_joint_limit_standalone.png`
   - `reports/sim2real/images/standalone_backend/m4_timeout_standalone.png`
   - `reports/sim2real/images/standalone_backend/m4_tilt_standalone.png`
+  - `reason=VELOCITY_LIMIT` terminal 증빙
 
 ### M5: standing
 
@@ -163,6 +165,32 @@ Stage1(`reports/stage1/*`)은 baseline 자산으로 유지하고, 본 문서는 
   - `logs/sim2real/20260314-121949_m5_stand_sanity_qrefv7/m5/sync_markers.txt`
   - `ros2_ws/src/rb_controller/config/scenarios/stand_pd_sanity.yaml`
 
+### M6: evidence / artifact infrastructure
+- 구현:
+  - `FIRST_SIM_STEP`, `CONTROL_ACTIVE` sync marker
+  - `fall_event.txt`, `sync_markers.txt`, `loop_post_sync.txt`, `loop_before_fall.txt`
+  - tmuxp fixed-window capture
+- 왜 중요했나:
+  - standing이나 safety 결과를 나중에 다시 설명하려면 raw log와 요약 아티팩트가 함께 있어야 하기 때문
+- 결과:
+  - `logs/sim2real/<run_id>/m5/*`, `logs/sim2real/<run_id>/m7/*` 구조 정착
+
+### M7: safety-on standing 재통합
+- 구현:
+  - `stand_pd_safecheck.yaml`
+  - `m7_stand_safecheck.yaml`
+  - `safety_enabled=true`, `effort_abs_max_default=18`, `tilt_limit=0.6rad`, `velocity_limit=8/12`
+- 왜 중요했나:
+  - controller-only로 서는 것과, safety까지 포함해 실무형 구조로 서는 것은 다르기 때문
+- 검증:
+  - `CONTROL_ACTIVE` 이후 60초 fixed window
+  - `[NO_FALL_EVENT]`
+  - `[NO_SAFETY_REASON]`
+- 대표 증빙:
+  - `logs/sim2real/20260314-133954_m7_stand_safecheck/m7/fall_event.txt`
+  - `logs/sim2real/20260314-133954_m7_stand_safecheck/m7/reason_count.txt`
+  - `logs/sim2real/20260314-133954_m7_stand_safecheck/m7/sync_markers.txt`
+
 ## 6) 현재 standing 해석
 - 기존 문제:
   - controller가 `imu_link` raw orientation을 이미 body/control frame에 정렬된 값처럼 사용
@@ -176,10 +204,9 @@ Stage1(`reports/stage1/*`)은 baseline 자산으로 유지하고, 본 문서는 
   - `imu_frame_mode=g1_imu_link`
 
 ## 7) 현재 남은 작업
-1. safety 켠 상태에서 standing 재통합
-2. no-disturbance safety-on hold 확인
-3. disturbance A/B 비교
-4. KPI/요약 리포트 정리
+1. disturbance A/B 비교
+2. KPI/요약 리포트 자동화
+3. 포트폴리오 패키징 마감
 
 ## 8) 아티팩트 경로
 - 실행 로그: `logs/sim2real/<timestamp>/`
