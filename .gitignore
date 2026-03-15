@@ -75,15 +75,13 @@ tests/
 **/gelsight_r15_data/*
 
 # Local-only agent/plan notes (Codex guardrails)
-AGENTS.md
-ROS2_SIM2REAL_STARTER_GUIDE.md
-VIDEO_CAPTURE_GUIDE.md
+docs/
 
 # Stage1 experiment artifacts policy:
 # - keep raw logs untracked
 # - keep summarized markdown/csv/png tracked
 logs/
-docs/
+
 
 # Portfolio-selected sim2real evidence only
 !logs/
