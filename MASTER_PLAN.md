@@ -110,8 +110,8 @@ Entry point
 프로젝트는 다음 milestone 순서로 진행한다.
 
 - `M0 → M6`: 시스템 bring-up 단계
-- `M7 → M10`: 현재 마감선 단계
-- `M11 이후`: 연구/확장 단계
+- `M7 → M9`: 현재 마감선 단계
+- `M10 이후`: 연구/확장 단계
 
 ---
 
@@ -232,7 +232,7 @@ controller를 바로 actuator에 연결하지 않고
 no-disturbance standing을 확보한다.
 
 현재 M5의 standing controller는 raw joint/IMU feedback를 직접 사용하는 경량 bring-up 구조이며,
-state estimator 분리는 후속 milestone(M11)에서 진행한다.
+state estimator 분리는 후속 milestone(M10)에서 진행한다.
 
 핵심 작업
 
@@ -395,36 +395,13 @@ run 결과를 자동 요약하고 run 간 비교 가능한 형태로 만든다.
 
 ---
 
-# M10 — Portfolio Packaging
-
-목표
-
-프로젝트 결과를 하나의 포트폴리오 스토리로 정리한다.
-
-포함
-
-- `README`
-- `overview`
-- `one-pager`
-- experiment figures
-- video capture
-
-설명 흐름
-
-sensor
-→ controller
-→ safety
-→ standing
-→ disturbance
-→ KPI
-
----
-
 # 7. 이후 확장 Milestone
 
+포트폴리오 정리/문서화는 공식 milestone이 아니라 보조 작업으로 별도 관리한다.
+
 ---
 
-# M11 — Estimator / Observer 고도화
+# M10 — Estimator / Observer 고도화
 
 목표
 
@@ -438,7 +415,7 @@ sensor
 
 ---
 
-# M12 — Balance Metrics
+# M11 — Balance Metrics
 
 목표
 
@@ -453,7 +430,7 @@ sensor
 
 ---
 
-# M13 — Whole-Body Control
+# M12 — Whole-Body Control
 
 목표
 
@@ -467,7 +444,7 @@ joint-space PD에서 task-space control로 확장한다.
 
 ---
 
-# M14 — RL Policy Layer
+# M13 — RL Policy Layer
 
 목표
 
@@ -480,7 +457,7 @@ low level stabilizing controller
 
 ---
 
-# M15 — Sim-to-Real Hardening
+# M14 — Sim-to-Real Hardening
 
 목표
 
@@ -495,7 +472,7 @@ low level stabilizing controller
 
 ---
 
-# M16 — Experiment Infrastructure
+# M15 — Experiment Infrastructure
 
 목표
 
@@ -510,7 +487,7 @@ low level stabilizing controller
 
 ---
 
-# M17 — Real-Time Execution Layer (RT Linux)
+# M16 — Real-Time Execution Layer (RT Linux)
 
 목표
 
@@ -537,7 +514,7 @@ real-time execution 환경을 구축한다.
 
 ---
 
-# M18 — Behavior / Task Planner
+# M17 — Behavior / Task Planner
 
 목표
 
@@ -617,6 +594,6 @@ Sensors
 
 현재 우선순위는 아래 순서로 고정한다.
 
-1. M10 — Portfolio Packaging
+1. 포트폴리오 정리 / 문서·증빙 갱신
 2. small cleanup — raw reason parsing / runner polish
-3. 이후 M11+ 확장
+3. 이후 M10+ 확장

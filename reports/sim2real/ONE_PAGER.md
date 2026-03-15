@@ -72,7 +72,7 @@ Isaac Sim과 실기체에서 재사용 가능한 ROS2 제어 스택 인터페이
 - M7 safety-on standing 완료
 - M8 대표 disturbance A/B 확보
 - M9 KPI/report 자동화 완료
-- 다음 단계: 포트폴리오 패키징
+- 다음 단계: 포트폴리오 정리 후 M10 observer refinement 진입
 
 ## 핵심 링크
 - 랜딩 페이지: [README.md](../../README.md)

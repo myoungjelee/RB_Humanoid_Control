@@ -181,19 +181,19 @@
 - 원인/해결을 더 명확히 고정한다. 기존 controller는 `imu_link` raw orientation을 이미 body/control frame에 정렬된 roll/pitch처럼 직접 사용해, 실제 전방 붕괴가 `pitch`가 아니라 `roll` 채널 변화로 들어오고 있었다. 해결은 IMU publisher를 뒤집는 것이 아니라 observer에서 `imu_link -> control frame` 보정을 적용하는 것이며, 현재 `imu_frame_mode=g1_imu_link`가 그 역할을 한다.
 - 문서 운영 기준도 정리했다. `README.md`는 일반 사용 설명서가 아니라 포트폴리오 랜딩 페이지로 유지하고, milestone 의미가 바뀔 때마다 `README + reports/sim2real/overview.md + reports/sim2real/ONE_PAGER.md + STATUS.md`를 같이 동기화한다.
 - README/overview/ONE_PAGER도 현재 상태에 맞춰 갱신했다. README는 포트폴리오 랜딩 페이지 톤으로 한글 위주 재작성했고, milestone별로 왜 이 순서로 진행했는지/무엇을 구현했고/무엇으로 검증했는지와 현재 standalone 증빙 링크를 반영했다.
-- `MASTER_PLAN.md`도 다시 milestone형 구조로 정리했다. 기존 `M0~M6` 흐름은 유지하고, 뒤에 `M7~M16`으로 safety 재통합, disturbance A/B, KPI 자동화, estimator/COM-ZMP/WBC/RL policy 등 후속 milestone을 추가했다.
+- `MASTER_PLAN.md`도 다시 milestone형 구조로 정리했다. 기존 `M0~M6` 흐름은 유지하고, 뒤에 safety 재통합, disturbance A/B, KPI 자동화, estimator/COM-ZMP/WBC/RL policy 등 후속 milestone을 추가했다.
 - `MASTER_PLAN.md`를 최종 milestone 문서로 다시 다듬었다. `M5`에는 실제 standing 실패 원인이었던 `imu_link -> control frame` 해석 불일치와 observer 보정 해결을 명시했고, `M6`는 증빙/아티팩트 인프라, `M9`는 KPI 자동 요약/비교로 역할을 분리했다.
-- `MASTER_PLAN.md`를 한 번 더 다듬어 현재 실험 상태와 맞췄다. `M6` 출력 구조를 실제 `logs/sim2real/<milestone>/<run_id>` 운영 기준으로 맞추고, `M8`은 아직 진행 중인 disturbance milestone답게 `목표 결과`와 `1차 sagittal / 후속 lateral` 구분으로 정리했으며, 후속 확장에는 `M17 RT Linux`, `M18 Behavior / Task Planner`를 추가했다.
-- `ROADMAP_SIMPLE.md`도 `MASTER_PLAN.md`와 같은 milestone 체계로 다시 정리했다. `M0~M16`을 간단 요약본으로 맞추고, 현재 standing 성과(`imu_frame_mode=g1_imu_link`)와 다음 우선순위(`M7 -> M8 -> M9`)가 한눈에 보이게 정리했다.
-- `AGENTS.md`의 문서 운영 규칙도 보강했다. `overview`는 milestone 완료/원인 해결 직후, `README`는 외부 공개용 상태 변화 시, `ONE_PAGER`는 `M5/M8/M10` 같은 체크포인트에서 갱신하도록 타이밍 기준을 명시했다.
+- `MASTER_PLAN.md`를 한 번 더 다듬어 현재 실험 상태와 맞췄다. `M6` 출력 구조를 실제 `logs/sim2real/<milestone>/<run_id>` 운영 기준으로 맞추고, `M8`은 아직 진행 중인 disturbance milestone답게 `목표 결과`와 `1차 sagittal / 후속 lateral` 구분으로 정리했으며, 후속 확장에는 `M16 RT Linux`, `M17 Behavior / Task Planner`를 추가했다.
+- `ROADMAP_SIMPLE.md`도 `MASTER_PLAN.md`와 같은 milestone 체계로 다시 정리했다. 현재 standing 성과(`imu_frame_mode=g1_imu_link`)와 다음 우선순위(`M7 -> M8 -> M9`)가 한눈에 보이게 정리했다.
+- `AGENTS.md`의 문서 운영 규칙도 보강했다. `overview`는 milestone 완료/원인 해결 직후, `README`는 외부 공개용 상태 변화 시, `ONE_PAGER`는 `M5/M8/굵직한 체크포인트` 기준으로 갱신하도록 타이밍 기준을 명시했다.
 - `ROADMAP_SIMPLE.md`의 milestone 제목도 한글 중심으로 정리했다. `M0 인터페이스 고정`, `M5 스탠딩 안정화`, `M8 외란 A/B 비교`처럼 한눈에 훑기 쉬운 형태로 맞췄다.
-- `ROADMAP_SIMPLE.md`를 표 중심 요약 문서로 다시 배치했다. `M0~M6`, `M7~M10`, `M11~M16`을 각각 표 1개로 묶어 `무엇 / 왜 / 목표`를 칸 안에서 바로 비교할 수 있게 정리했다.
+- `ROADMAP_SIMPLE.md`를 표 중심 요약 문서로 다시 배치했다. `M0~M6`, `M7~M9`, `M10+`를 각각 표 1개로 묶어 `무엇 / 왜 / 목표`를 칸 안에서 바로 비교할 수 있게 정리했다.
 - `M7` safety 재통합용 경로를 분리했다. `stand_pd_safecheck.yaml`은 현재 standing baseline에 `safety_enabled=true`, `effort_abs_max_default=18.0`, `tilt_limit=0.6rad`, `velocity_limit(default/ankle)=8/12rad/s`를 얹은 전용 시나리오이고, `ops/tmuxp/m7_stand_safecheck.yaml`은 headless 60초 관측창 동안 `reason_count/sync_markers/loop_post_sync/loop_before_fall`를 자동 수집한다.
 - `VIDEO_CAPTURE_GUIDE.md`도 현재 milestone 체계로 다시 맞췄다. 예전 `M5 disturbance hook` 중심 구조를 버리고, `M5 standing hold -> M7 safety-on -> M8 disturbance A/B -> M9 KPI` 순서로 어떤 장면을 찍고 어떻게 편집할지 기준을 다시 정리했다.
 - `M7` safecheck 캡처 기준도 조정했다. `m7_stand_safecheck.yaml`은 이제 `FIRST_SIM_STEP`가 아니라 controller 로그의 `[SYNC] CONTROL_ACTIVE`를 관측창 시작점으로 삼아, “sim이 시작된 뒤 60초”가 아니라 “실제 제어가 붙은 뒤 60초”를 기준으로 safety-on standing을 해석한다.
 - `M4` safety 증빙도 보강한다. `velocity.yaml` + `ops/tmuxp/m4_velocity.yaml`을 추가해 팔 관절 하나를 빠르게 움직이는 전용 시나리오로 `reason=VELOCITY_LIMIT`를 재현하고, `reasons.txt`와 `loop_tail.txt`를 기존 M4 reason과 같은 방식으로 수집한다.
 - `M7`은 safety-on standing 기준으로 사실상 통과했다. `logs/sim2real/_legacy/20260314-133954_m7_stand_safecheck/m7/`에서 `CONTROL_ACTIVE` 이후 60초 동안 `[NO_FALL_EVENT]`, `[NO_SAFETY_REASON]`를 확인했고, 이에 맞춰 `README/overview/ONE_PAGER/VIDEO_CAPTURE_GUIDE`를 M8 진입 전 상태로 다시 동기화했다.
-- `MASTER_PLAN.md`와 `overview.md`의 M5 설명도 보강했다. 현재 standing controller는 raw joint/IMU direct feedback 기반의 경량 bring-up 구조이며, estimator 분리는 후속 milestone(M11)에서 진행한다는 점을 명시해 “왜 estimator가 아직 별도 노드가 아닌가”를 문서에서 바로 설명할 수 있게 했다.
+- `MASTER_PLAN.md`와 `overview.md`의 M5 설명도 보강했다. 현재 standing controller는 raw joint/IMU direct feedback 기반의 경량 bring-up 구조이며, estimator 분리는 후속 milestone(M10)에서 진행한다는 점을 명시해 “왜 estimator가 아직 별도 노드가 아닌가”를 문서에서 바로 설명할 수 있게 했다.
 - `M8` 비교 경로도 시작했다. `m8_disturb` phase에 torso 단일 force pulse 훅(`DISTURBANCE_START/END`)을 추가하고, `stand_pd_balance_off.yaml`(tilt/balance feedback off) / `stand_pd_balance_on.yaml`(현재 baseline) / `ops/tmuxp/m8_disturb.yaml`을 만들어 같은 외란에서 balance feedback OFF/ON을 같은 방식으로 수집할 수 있게 정리했다.
 - 위 M8는 “외란 유무 비교”가 아니라 “같은 torso push에서 balance feedback 유무 비교”라는 의미로 고정한다. `m8_disturb.yaml`은 `loop_after_disturb.txt`와 함께 `disturb_kpi.txt`를 생성해 `peak_abs_tilt_r/p_after_disturb`를 no-fall 상황에서도 비교 가능하게 남긴다.
 - 첫 M8 런에서는 `120N x 0.20s` torso push가 너무 강해 `balance_off`와 `balance_on` 모두 외란 직후 `~5.8s`에 fall했다. 이에 따라 `m8_disturb.yaml`의 `disturb_kpi` 추출 버그를 수정하고, 기본 disturbance magnitude를 `60N x 0.10s`로 낮춰 OFF/ON 차이가 보이도록 다시 맞춘다.
@@ -226,7 +226,8 @@
 - `ops/run_m8_and_m9.sh`는 내부에서 하위 스크립트를 직접 실행하지 않고 `bash`로 명시 호출한다. 이렇게 해야 `chmod +x` 유무와 무관하게 wrapper가 항상 동작하고, 실제 사용자 실행 방식(`bash ops/...`)과도 일관된다.
 - M9 산출물 중 `kpi.json` / `comparison.json`은 기계용으로 유지하고, `summary.md`만 사람용으로 더 짧게 줄인다. summary는 `verdict / outcome / key KPI / 핵심 설정 2개`만 남기고 dict/raw 경로 같은 저수준 정보는 제거한다.
 - M9 `summary.md`는 최종적으로 표 형식으로 고정한다. Header 아래에 `run_id / verdict / disturbance`를 두고, `Outcome`, `Key KPI`, `Config`는 모두 markdown table로 출력한다. metric 이름은 JSON 키와 맞추고, 설정은 `tilt_qref_bias_abs_max`, `hip_pitch_joint_trim`, `ankle_pitch_joint_trim`만 노출한다.
-- README / overview / one-pager / master plan을 M9 완료 상태로 동기화한다. 이제 현재 게이트는 `M10 포트폴리오 패키징`이고, M9는 `M8 raw -> M9 summary` 자동화까지 끝난 상태로 본다.
+- README / overview / one-pager / master plan을 M9 완료 상태로 동기화한다. 이제 현재 게이트는 `포트폴리오 정리`이고, M9는 `M8 raw -> M9 summary` 자동화까지 끝난 상태로 본다.
+- 공식 milestone 체계에서 `Portfolio Packaging`을 제거하고, 기존 `M11~M18`을 `M10~M17`로 재번호했다. `MASTER_PLAN / README / overview / ONE_PAGER / KIST insert layout`을 새 번호 체계로 다시 동기화한다.
 - 위 gain 보수화 후 `100N x 0.10s`에서는 `balance_off/on` 모두 no-fall이었고, `balance_on`이 `balance_off`보다 `peak_abs_tilt_r`를 더 작게 유지했다. 다음 단계는 같은 설정에서 force만 `105N`으로 올려 `OFF fall / ON survive` 경계값을 찾는 threshold search다.
 - M8 영상 캡처 목적도 반영한다. `m8_disturb`는 더 이상 `fall 시 즉시 종료`가 아니라 `stop_on_fall_event=false`로 두고, `FALL_EVENT`는 로그만 남긴 채 pane 3의 고정 관측창이 끝날 때까지 계속 재생한다. 외란 시작은 단순 `sim elapsed`가 아니라 `CONTROL_ACTIVE marker + 3.0초` 기준으로 맞춘다. tmux pane 3가 `[SYNC] CONTROL_ACTIVE`를 잡으면 marker 파일을 만들고, `world.py`가 이를 감지해 `DISTURBANCE_START`를 동일한 제어 기준 시점에 맞춰 split-screen 비교가 쉬운 fixed-window 영상으로 남긴다. `start_elapsed_sec=5.0`은 marker 실패 시 fallback으로만 유지한다.
 - `logs/sim2real/` 운영 규칙도 재정리한다. 기존 run-id 기반 exploratory 로그는 `_legacy/` 아래로 묶어 보존하고, 앞으로 생성되는 로그는 `logs/sim2real/<milestone>/<run_id>/...` milestone-first 구조로 고정한다.

@@ -13,7 +13,7 @@ Stage1(`reports/stage1/*`)은 baseline 자산으로 유지하고, 본 문서는 
   - safety-on 기준 `CONTROL_ACTIVE` 이후 60초 no-fall / no-safety-reason 확인
   - `113N x 0.10s` sagittal torso impulse 기준 `OFF 3/3 fall`, `ON 3/3 no-fall` 확인
 - 다음 단계:
-  - 포트폴리오 패키징
+  - 포트폴리오 정리 후 M10 observer refinement 진입
 
 ## 3) 왜 이 순서로 진행했는가
 이 프로젝트는 처음부터 "잘 서는가?"를 바로 보는 대신, **실패 원인을 좁혀갈 수 있는 순서**로 구성했습니다.
@@ -121,7 +121,7 @@ Stage1(`reports/stage1/*`)은 baseline 자산으로 유지하고, 본 문서는 
   - disturbance 이전에 stand 자체가 성립하는지부터 확인해야 하기 때문
 - 구조 메모:
   - 현재 M5의 standing controller는 raw joint/IMU feedback를 직접 사용하는 경량 bring-up 구조다
-  - state estimator 분리는 후속 milestone(M11)에서 진행한다
+  - state estimator 분리는 후속 milestone(M10)에서 진행한다
 - 여기서 한 일:
   - `stand_pd_sanity` 경로 분리
   - controller-only bring-up
@@ -242,9 +242,9 @@ Stage1(`reports/stage1/*`)은 baseline 자산으로 유지하고, 본 문서는 
   - `imu_frame_mode=g1_imu_link`
 
 ## 7) 현재 남은 작업
-1. 포트폴리오 패키징 마감
+1. 포트폴리오 정리 마감
 2. `reason_count.txt` raw parsing 정리
-3. 이후 robustness margin 확장
+3. 이후 M10+ robustness / estimation 확장
 
 ## 8) 아티팩트 경로
 - 실행 로그: `logs/sim2real/<milestone>/<run_id>/`
