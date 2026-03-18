@@ -4,6 +4,8 @@
 이 문서는 `ros2_ws/` 기반 Sim-to-Real 메인 트랙의 진행 상태와 검증 결과를 기술적으로 정리한 문서입니다.  
 Stage1(`reports/stage1/*`)은 baseline 자산으로 유지하고, 본 문서는 ROS2 메인 트랙이 **왜 이런 순서로 진행됐는지**, **각 단계에서 무엇을 구현했고 무엇으로 검증했는지**, **현재 어디까지 왔는지**를 기록합니다.
 
+README는 포트폴리오 랜딩 페이지, `ONE_PAGER`는 압축 요약, 이 문서는 그 둘을 뒷받침하는 기술 복기 문서 역할을 맡습니다.
+
 ## 2) 현재 단계
 - 상태: M0 완료, M1 완료, M2 완료, M3 완료, M4 완료, M5 standing hold 확보, M6 증빙 인프라 완료, M7 safety-on standing 완료, M8 대표 disturbance A/B 확보, M9 KPI 자동화 완료
 - 현재 핵심 성과:
@@ -12,8 +14,12 @@ Stage1(`reports/stage1/*`)은 baseline 자산으로 유지하고, 본 문서는 
   - observer 쪽 `imu_frame_mode=g1_imu_link` 보정으로 개선
   - safety-on 기준 `CONTROL_ACTIVE` 이후 60초 no-fall / no-safety-reason 확인
   - `113N x 0.10s` sagittal torso impulse 기준 `OFF 3/3 fall`, `ON 3/3 no-fall` 확인
+- 현재 공개 자산:
+  - `reports/sim2real/images/standalone_backend/system_architecture.png`
+  - `reports/sim2real/images/standalone_backend/milestone_roadview.png`
+  - `reports/sim2real/video/RB_Humanoid_Control.mp4`
 - 다음 단계:
-  - 포트폴리오 정리 후 M10 observer refinement 진입
+  - M10 observer refinement 진입
 
 ## 3) 왜 이 순서로 진행했는가
 이 프로젝트는 처음부터 "잘 서는가?"를 바로 보는 대신, **실패 원인을 좁혀갈 수 있는 순서**로 구성했습니다.
@@ -242,9 +248,9 @@ Stage1(`reports/stage1/*`)은 baseline 자산으로 유지하고, 본 문서는 
   - `imu_frame_mode=g1_imu_link`
 
 ## 7) 현재 남은 작업
-1. 포트폴리오 정리 마감
+1. M10 observer / estimator 고도화
 2. `reason_count.txt` raw parsing 정리
-3. 이후 M10+ robustness / estimation 확장
+3. 이후 M11+ robustness / estimation 확장
 
 ## 8) 아티팩트 경로
 - 실행 로그: `logs/sim2real/<milestone>/<run_id>/`
@@ -258,6 +264,10 @@ Stage1(`reports/stage1/*`)은 baseline 자산으로 유지하고, 본 문서는 
   - `reports/sim2real/overview.md`
   - `reports/sim2real/ONE_PAGER.md`
   - `STATUS.md`
+- 공개 자산:
+  - `reports/sim2real/images/standalone_backend/system_architecture.png`
+  - `reports/sim2real/images/standalone_backend/milestone_roadview.png`
+  - `reports/sim2real/video/RB_Humanoid_Control.mp4`
 - M9 요약 경로:
   - `logs/sim2real/m9/<run_id>/balance_off_kpi.json`
   - `logs/sim2real/m9/<run_id>/balance_on_kpi.json`

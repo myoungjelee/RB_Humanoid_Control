@@ -457,22 +457,7 @@ low level stabilizing controller
 
 ---
 
-# M14 — Sim-to-Real Hardening
-
-목표
-
-실기체 대응 robustness를 높인다.
-
-추가
-
-- actuator delay
-- sensor noise
-- latency
-- domain randomization
-
----
-
-# M15 — Experiment Infrastructure
+# M14 — Experiment Infrastructure
 
 목표
 
@@ -484,6 +469,21 @@ low level stabilizing controller
 - KPI trend plots
 - failure taxonomy
 - auto markdown summary
+
+---
+
+# M15 — Sim-to-Real Hardening
+
+목표
+
+실기체 대응 robustness를 높인다.
+
+추가
+
+- actuator delay
+- sensor noise
+- latency
+- domain randomization
 
 ---
 
