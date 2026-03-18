@@ -34,7 +34,7 @@ Isaac Sim과 실기체에서 재사용 가능한 ROS2 제어 스택 인터페이
   - 현재 파라미터: `imu_frame_mode=g1_imu_link`
 
 ## 대표 자산
-- 최종 시연영상: [RB_Humanoid_Control.mp4](video/RB_Humanoid_Control.mp4)
+- 최종 시연영상: [GitHub inline demo](https://github.com/user-attachments/assets/4e70156b-aca6-4c3a-859f-7526fa2f511e)
 - 시스템 구조도: [system_architecture.png](images/standalone_backend/system_architecture.png)
 - 검증 범위 / 다음 단계: [milestone_roadview.png](images/standalone_backend/milestone_roadview.png)
 
