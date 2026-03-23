@@ -588,6 +588,45 @@ Sensors
 - Safety
 - Logger
 
+패키지 구조는 위 노드 구조와 같은 방향으로 가져가되,
+한 번에 전부 분리하지 않고 milestone 진행에 맞춰 단계적으로 옮긴다.
+
+권장 최종 패키지 구조
+
+- `rb_interfaces`
+- `rb_bringup`
+- `rb_estimation`
+- `rb_planning`
+- `rb_control`
+- `rb_safety`
+- `rb_recorder`
+- 필요 시 `rb_sim_bridge` / `rb_hw_interface`
+
+패키지 분리 시점 원칙
+
+1. `M10`
+   - 지금 단계에서는 runtime 경계만 먼저 고정한다.
+   - 즉 `Estimator -> Controller -> Safety` 노드 구조를 먼저 안정화하고,
+     패키지는 기존 `rb_controller` 안에 유지해도 된다.
+2. `M11 ~ M12`
+   - estimator / controller / safety 사이의 msg, topic, param 계약이 굳으면
+     `rb_interfaces`, `rb_estimation`, `rb_control`, `rb_safety` 분리를 시작한다.
+   - 이 시점이 첫 번째 패키지 분리 기준선이다.
+3. `M13 ~ M14`
+   - RL / experiment infrastructure가 커지면
+     `rb_bringup`, `rb_recorder`, 필요 시 `rb_sim_bridge`를 분리한다.
+   - 즉 launch / orchestration / logging을 제어 패키지와 분리한다.
+4. `M17`
+   - planner / behavior가 실제 runtime 계층으로 들어오는 시점에
+     `rb_planning`을 별도 패키지로 추가한다.
+
+정리하면,
+
+- 구조 설계는 지금 확정한다.
+- 물리적 패키지 이동은 계약이 굳은 것부터 순서대로 한다.
+- 아직 비어 있는 layer를 미리 패키지로 만드는 것보다,
+  실제 runtime 책임이 생기는 시점에 분리하는 쪽을 기본 원칙으로 한다.
+
 ---
 
 # 9. 현재 우선순위

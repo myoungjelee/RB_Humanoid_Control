@@ -19,14 +19,9 @@ from scripts.sim2real.app.config import (
     get_phase_config,
     load_sim2real_config,
 )
-from scripts.sim2real.app.phases import (
-    prepare_phase_runtime,
-    run_m1_sensor_phase,
-    run_m3_command_phase,
-    run_m8_disturb_phase,
-    run_m5_pose_audit_phase,
-    run_m5_stand_phase,
-)
+from scripts.sim2real.app.phase_registry import SUPPORTED_PHASES, run_phase
+from scripts.sim2real.app.phase_runtime import prepare_phase_runtime
+from scripts.sim2real.app.telemetry import log_config, log_exception, log_result
 
 
 def _resolve_runtime_device() -> str:
@@ -68,34 +63,25 @@ def run(argv: list[str] | None = None, forced_phase: str | None = None) -> int:
     device_from_cli = "--device" in raw_argv
     disable_from_cli = ("--disable_fabric" in raw_argv) or ("--no-disable_fabric" in raw_argv)
 
-    # 1) device 결정
     if device_from_cli:
         selected_device = str(args_cli.device)
     else:
         selected_device = _resolve_runtime_device()
 
-    # 2) disable_fabric 결정
-    # - CLI로 명시했으면 그 값을 최우선
-    # - 아니면 디바이스 기반 자동 선택(cpu면 true, cuda면 false)
     if disable_from_cli:
         selected_disable_fabric = bool(args_cli.disable_fabric)
     else:
         selected_disable_fabric = selected_device.startswith("cpu")
 
-    # --disable_fabric 명시 시 안정성을 위해 device를 cpu로 강제
     if disable_from_cli and selected_disable_fabric and selected_device != "cpu":
-        print(
-            "[CONFIG] overriding --device to cpu because --disable_fabric was explicitly set",
-            flush=True,
-        )
+        log_config("overriding --device to cpu because --disable_fabric was explicitly set")
         selected_device = "cpu"
 
     args_cli.device = selected_device
     args_cli.disable_fabric = selected_disable_fabric
-    print(
-        f"[CONFIG] device={args_cli.device} disable_fabric={args_cli.disable_fabric}"
-        f" (device_cli={device_from_cli}, disable_cli={disable_from_cli})",
-        flush=True,
+    log_config(
+        f"device={args_cli.device} disable_fabric={args_cli.disable_fabric}"
+        f" (device_cli={device_from_cli}, disable_cli={disable_from_cli})"
     )
 
     config = load_sim2real_config(args_cli.config)
@@ -103,10 +89,9 @@ def run(argv: list[str] | None = None, forced_phase: str | None = None) -> int:
     phase = forced_phase or args_cli.phase or default_phase
 
     phase_cfg = get_phase_config(config, phase)
-    if phase in ("m1_sensor", "m3_command", "m5_stand", "m5_pose_audit", "m8_disturb"):
-        phase_cfg = apply_m1_cli_overrides(phase_cfg, args_cli)
-    else:
+    if phase not in SUPPORTED_PHASES:
         raise ValueError(f"Unsupported phase: {phase}")
+    phase_cfg = apply_m1_cli_overrides(phase_cfg, args_cli)
 
     prepare_phase_runtime(args_cli, phase_cfg)
     app_launcher = AppLauncher(args_cli)
@@ -114,29 +99,23 @@ def run(argv: list[str] | None = None, forced_phase: str | None = None) -> int:
 
     exit_code = 1
     try:
-        if phase == "m1_sensor":
-            result = run_m1_sensor_phase(args_cli, phase_cfg, simulation_app)
-        elif phase == "m3_command":
-            result = run_m3_command_phase(args_cli, phase_cfg, simulation_app)
-        elif phase == "m5_stand":
-            result = run_m5_stand_phase(args_cli, phase_cfg, simulation_app)
-        elif phase == "m8_disturb":
-            result = run_m8_disturb_phase(args_cli, phase_cfg, simulation_app)
-        elif phase == "m5_pose_audit":
-            result = run_m5_pose_audit_phase(args_cli, phase_cfg, simulation_app)
-        else:
-            raise ValueError(f"Unsupported phase: {phase}")
-        print(f"[RESULT] task_id={result.get('task_id')}", flush=True)
-        print(f"[RESULT] status={result.get('status')}", flush=True)
-        print(f"[RESULT] executed_steps={result.get('executed_steps')}", flush=True)
-        print(f"[RESULT] elapsed_sec={result.get('elapsed_sec')}", flush=True)
-        print(f"[RESULT] graph_built={result.get('graph_built')}", flush=True)
-        print(f"[RESULT] graph_note={result.get('graph_note')}", flush=True)
+        result = run_phase(
+            phase,
+            args_cli=args_cli,
+            phase_cfg=phase_cfg,
+            simulation_app=simulation_app,
+        )
+        for key in ("task_id", "status", "executed_steps", "elapsed_sec", "graph_built", "graph_note"):
+            log_result(key, result.get(key))
         status = str(result.get("status", "failed"))
-        exit_code = 0 if status in ("completed_target_steps", "stopped_early", "stopped_no_step_limit", "stopped_on_fall_event") else 1
+        exit_code = 0 if status in (
+            "completed_target_steps",
+            "stopped_early",
+            "stopped_no_step_limit",
+            "stopped_on_fall_event",
+        ) else 1
     except Exception as exc:
-        print(f"[ERROR] exception: {type(exc).__name__}: {exc}", flush=True)
-        print(traceback.format_exc(), flush=True)
+        log_exception(exc, traceback.format_exc())
         exit_code = 1
     finally:
         simulation_app.close()

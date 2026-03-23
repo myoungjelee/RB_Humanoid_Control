@@ -8,9 +8,9 @@
 #include <unordered_map>
 #include <vector>
 
+#include "rb_controller/msg/estimated_state.hpp"
 #include "rclcpp/rclcpp.hpp"
 #include "rcl_interfaces/msg/set_parameters_result.hpp"
-#include "sensor_msgs/msg/imu.hpp"
 #include "sensor_msgs/msg/joint_state.hpp"
 
 // 컨트롤러 출력에 안전 필터를 적용해 최종 /rb/command_safe를 퍼블리시하는 노드
@@ -30,8 +30,9 @@ public:
         "output_command_topic", "/rb/command_safe");
     input_joint_states_topic_ = this->declare_parameter<std::string>(
         "input_joint_states_topic", "/rb/joint_states");
+    input_estimated_state_topic_ = this->declare_parameter<std::string>(
+        "input_estimated_state_topic", "/rb/estimated_state");
     imu_topic_ = this->declare_parameter<std::string>("imu_topic", "/rb/imu");
-    imu_zero_on_start_ = this->declare_parameter<bool>("imu_zero_on_start", false);
 
     safety_enabled_ = this->declare_parameter<bool>("safety_enabled", true);
     safe_mode_action_ = this->declare_parameter<std::string>("safe_mode_action", "zero_effort");
@@ -88,9 +89,9 @@ public:
     joint_state_sub_ = this->create_subscription<sensor_msgs::msg::JointState>(
         input_joint_states_topic_, 10,
         std::bind(&RbSafetyNode::on_joint_state, this, std::placeholders::_1));
-    imu_sub_ = this->create_subscription<sensor_msgs::msg::Imu>(
-        imu_topic_, 10,
-        std::bind(&RbSafetyNode::on_imu, this, std::placeholders::_1));
+    estimated_state_sub_ = this->create_subscription<rb_controller::msg::EstimatedState>(
+        input_estimated_state_topic_, 10,
+        std::bind(&RbSafetyNode::on_estimated_state, this, std::placeholders::_1));
     watchdog_timer_ = this->create_wall_timer(
         std::chrono::duration_cast<std::chrono::nanoseconds>(
             std::chrono::duration<double>(1.0 / watchdog_rate_hz_)),
@@ -105,10 +106,10 @@ public:
 
     RCLCPP_INFO(
         this->get_logger(),
-        "rb_safety started: in=%s out=%s js=%s imu=%s safety=%s imu_zero_on_start=%s limits=%zu timeout=%.3fs vel_limit(default/ankle)=%.3f/%.3f watchdog=%.1fHz",
+        "rb_safety started: in=%s out=%s js=%s est=%s safety=%s limits=%zu timeout=%.3fs vel_limit(default/ankle)=%.3f/%.3f watchdog=%.1fHz",
         input_command_topic_.c_str(), output_command_topic_.c_str(),
-        input_joint_states_topic_.c_str(), imu_topic_.c_str(),
-        (safety_enabled_ ? "on" : "off"), imu_zero_on_start_ ? "on" : "off", joint_limits_.size(),
+        input_joint_states_topic_.c_str(), input_estimated_state_topic_.c_str(),
+        (safety_enabled_ ? "on" : "off"), joint_limits_.size(),
         input_timeout_sec_, velocity_limit_default_rad_s_, velocity_limit_ankle_rad_s_, watchdog_rate_hz_);
   }
 
@@ -170,7 +171,7 @@ private:
       const std::string &name = param.get_name();
 
       if (name == "input_command_topic" || name == "output_command_topic" ||
-          name == "input_joint_states_topic" || name == "imu_topic")
+          name == "input_joint_states_topic" || name == "input_estimated_state_topic" || name == "imu_topic")
       {
         result.successful = false;
         result.reason = "runtime update not supported for topic parameters (restart required)";
@@ -193,14 +194,6 @@ private:
         result.successful = false;
         result.reason = "runtime update not supported for watchdog_rate_hz (restart required)";
         return result;
-      }
-      if (name == "imu_zero_on_start")
-      {
-        imu_zero_on_start_ = param.as_bool();
-        imu_bias_captured_ = false;
-        imu_roll_bias_rad_ = 0.0;
-        imu_pitch_bias_rad_ = 0.0;
-        continue;
       }
       if (name == "safe_mode_action")
       {
@@ -312,10 +305,9 @@ private:
 
     RCLCPP_INFO(
         this->get_logger(),
-        "runtime safety parameters updated: safety=%s safe_mode=%s imu_zero=%s effort_max=%.3f margin=%.4f timeout=%.3f tilt_limit=[%.3f,%.3f] vel_limit(default/ankle)=%.3f/%.3f debug(joint/tilt)=%s/%s",
+        "runtime safety parameters updated: safety=%s safe_mode=%s effort_max=%.3f margin=%.4f timeout=%.3f tilt_limit=[%.3f,%.3f] vel_limit(default/ankle)=%.3f/%.3f debug(joint/tilt)=%s/%s",
         safety_enabled_ ? "on" : "off",
         safe_mode_action_.c_str(),
-        imu_zero_on_start_ ? "on" : "off",
         effort_abs_max_default_,
         joint_limit_margin_rad_,
         input_timeout_sec_,
@@ -377,43 +369,17 @@ private:
   /**
    * @brief /rb/imu 수신 콜백: roll/pitch 추정을 위한 최신 자세를 저장한다.
    */
-  void on_imu(const sensor_msgs::msg::Imu::SharedPtr msg)
+  void on_estimated_state(const rb_controller::msg::EstimatedState::SharedPtr msg)
   {
     if (!msg)
     {
       return;
     }
 
-    const double x = msg->orientation.x;
-    const double y = msg->orientation.y;
-    const double z = msg->orientation.z;
-    const double w = msg->orientation.w;
-
-    const double sinr_cosp = 2.0 * (w * x + y * z);
-    const double cosr_cosp = 1.0 - 2.0 * (x * x + y * y);
-    const double roll = std::atan2(sinr_cosp, cosr_cosp);
-
-    const double sinp = 2.0 * (w * y - z * x);
-    const double pitch = std::asin(std::clamp(sinp, -1.0, 1.0));
-
-    if (imu_zero_on_start_ && !imu_bias_captured_)
-    {
-      imu_roll_bias_rad_ = roll;
-      imu_pitch_bias_rad_ = pitch;
-      imu_bias_captured_ = true;
-      RCLCPP_INFO(
-          this->get_logger(),
-          "imu bias captured: roll=%.3f pitch=%.3f",
-          imu_roll_bias_rad_, imu_pitch_bias_rad_);
-    }
-
-    const double roll_bias = imu_zero_on_start_ ? imu_roll_bias_rad_ : 0.0;
-    const double pitch_bias = imu_zero_on_start_ ? imu_pitch_bias_rad_ : 0.0;
-    latest_roll_rad_ = normalize_angle_rad(roll - roll_bias);
-    latest_pitch_rad_ = pitch - pitch_bias;
-
-    latest_imu_received_ = true;
-    latest_imu_time_steady_ = std::chrono::steady_clock::now();
+    latest_roll_rad_ = msg->tilt_roll_rad;
+    latest_pitch_rad_ = msg->tilt_pitch_rad;
+    latest_estimated_state_received_ = true;
+    latest_estimated_state_time_steady_ = std::chrono::steady_clock::now();
   }
 
   /**
@@ -701,11 +667,11 @@ private:
     {
       return false;
     }
-    if (!latest_imu_received_)
+    if (!latest_estimated_state_received_)
     {
       RCLCPP_WARN_THROTTLE(
           this->get_logger(), *this->get_clock(), 5000,
-          "tilt check enabled but /rb/imu has no samples yet");
+          "tilt check enabled but /rb/estimated_state has no samples yet");
       return false;
     }
 
@@ -814,12 +780,12 @@ private:
         const char * axis =
             (roll_exceeded && pitch_exceeded) ? "ROLL+PITCH" :
             (roll_exceeded ? "ROLL" : (pitch_exceeded ? "PITCH" : "UNKNOWN"));
-        const double imu_age_sec = latest_imu_received_
-            ? std::chrono::duration<double>(std::chrono::steady_clock::now() - latest_imu_time_steady_).count()
+        const double estimated_state_age_sec = latest_estimated_state_received_
+            ? std::chrono::duration<double>(std::chrono::steady_clock::now() - latest_estimated_state_time_steady_).count()
             : -1.0;
         RCLCPP_WARN(
             this->get_logger(),
-            "safety active: reason=TILT axis=%s roll=%.3f pitch=%.3f abs=[%.3f,%.3f] limit=[%.3f,%.3f] imu_age=%.3fs",
+            "safety active: reason=TILT axis=%s roll=%.3f pitch=%.3f abs=[%.3f,%.3f] limit=[%.3f,%.3f] estimated_state_age=%.3fs",
             axis,
             latest_roll_rad_,
             latest_pitch_rad_,
@@ -827,7 +793,7 @@ private:
             abs_pitch,
             tilt_limit_roll_rad_,
             tilt_limit_pitch_rad_,
-            imu_age_sec);
+            estimated_state_age_sec);
       }
       else
       {
@@ -984,6 +950,7 @@ private:
   std::string input_command_topic_{"/rb/command_raw"};
   std::string output_command_topic_{"/rb/command_safe"};
   std::string input_joint_states_topic_{"/rb/joint_states"};
+  std::string input_estimated_state_topic_{"/rb/estimated_state"};
   std::string imu_topic_{"/rb/imu"};
 
   bool safety_enabled_{true};
@@ -1023,23 +990,19 @@ private:
   std::chrono::steady_clock::time_point node_start_steady_;
   std::chrono::steady_clock::time_point latest_command_time_steady_;
   std::chrono::steady_clock::time_point latest_joint_state_time_steady_;
-  std::chrono::steady_clock::time_point latest_imu_time_steady_;
+  std::chrono::steady_clock::time_point latest_estimated_state_time_steady_;
 
   bool latest_command_received_{false};
   bool latest_joint_state_received_{false};
-  bool latest_imu_received_{false};
-  bool imu_zero_on_start_{false};
-  bool imu_bias_captured_{false};
+  bool latest_estimated_state_received_{false};
   double latest_roll_rad_{0.0};
   double latest_pitch_rad_{0.0};
-  double imu_roll_bias_rad_{0.0};
-  double imu_pitch_bias_rad_{0.0};
   sensor_msgs::msg::JointState latest_raw_command_;
 
   rclcpp::Publisher<sensor_msgs::msg::JointState>::SharedPtr command_pub_;
   rclcpp::Subscription<sensor_msgs::msg::JointState>::SharedPtr command_sub_;
   rclcpp::Subscription<sensor_msgs::msg::JointState>::SharedPtr joint_state_sub_;
-  rclcpp::Subscription<sensor_msgs::msg::Imu>::SharedPtr imu_sub_;
+  rclcpp::Subscription<rb_controller::msg::EstimatedState>::SharedPtr estimated_state_sub_;
   rclcpp::TimerBase::SharedPtr watchdog_timer_;
   OnSetParametersCallbackHandle::SharedPtr param_callback_handle_;
 };

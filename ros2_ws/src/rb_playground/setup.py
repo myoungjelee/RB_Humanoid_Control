@@ -14,8 +14,8 @@ setup(
     zip_safe=True,
     maintainer="leemou",
     maintainer_email="mjzizou@naver.com",
-    description="TODO: Package description",
-    license="TODO: License declaration",
+    description="Scratch ROS2 Python playground package for quick local experiments.",
+    license="Apache-2.0",
     extras_require={
         "test": [
             "pytest",

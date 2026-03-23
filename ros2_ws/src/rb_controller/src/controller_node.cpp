@@ -12,13 +12,14 @@
 #include <utility>
 #include <vector>
 
+#include "rb_controller/msg/estimated_state.hpp"
+#include "controller_debug_logger.hpp"
+#include "controller_types.hpp"
+#include "controller_stand_utils.hpp"
+#include "controller_runtime_state.hpp"
 #include "rclcpp/rclcpp.hpp"
 #include "rcl_interfaces/msg/set_parameters_result.hpp"
-#include "sensor_msgs/msg/imu.hpp"
 #include "sensor_msgs/msg/joint_state.hpp"
-#include "controller_debug_logger.hpp"
-#include "controller_tilt_observer.hpp"
-#include "controller_types.hpp"
 
 namespace rbci = rb_controller::internal;
 
@@ -47,13 +48,11 @@ public:
   /**
    * @brief rb_controller 노드를 생성하고 ROS2 통신/타이머를 초기화한다.
    *
-   * 파라미터를 선언하고, /rb/joint_states 구독 + /rb/command_raw 퍼블리시 +
+   * 파라미터를 선언하고, /rb/estimated_state 구독 + /rb/command_raw 퍼블리시 +
    * wall timer(기본 200Hz)를 연결한다.
    */
   RbControllerNode()
-      : Node("rb_controller"),
-        steady_prev_tick_(std::chrono::steady_clock::time_point::min()),
-        steady_last_log_(std::chrono::steady_clock::now())
+      : Node("rb_controller")
   {
     // 제어 주기/로그/토픽을 런타임 파라미터로 받는다.
     control_rate_hz_ = this->declare_parameter<double>("control_rate_hz", 200.0);
@@ -61,7 +60,7 @@ public:
     miss_ratio_threshold_ =
         this->declare_parameter<double>("miss_ratio_threshold", 1.2);
     input_topic_ =
-        this->declare_parameter<std::string>("input_joint_states_topic", "/rb/joint_states");
+        this->declare_parameter<std::string>("input_estimated_state_topic", "/rb/estimated_state");
     output_topic_ =
         this->declare_parameter<std::string>("output_command_raw_topic", "/rb/command_raw");
     joint_names_ =
@@ -294,18 +293,14 @@ public:
     tilt_weight_pitch_ankle_ = std::max(0.0, tilt_weight_pitch_ankle_);
     tilt_weight_pitch_knee_ = std::max(0.0, tilt_weight_pitch_knee_);
     tilt_weight_pitch_torso_ = std::max(0.0, tilt_weight_pitch_torso_);
-    tilt_observer_.set_zero_on_start(imu_zero_on_start_);
-    tilt_observer_.set_frame_mode(imu_frame_mode_);
     // 200Hz 기준 expected dt = 0.005s
     expected_dt_sec_ = 1.0 / control_rate_hz_;
 
-    // 제어 명령 publish, joint state subscribe 배선
+    // 제어 명령 publish, estimated_state subscribe 배선
     command_pub_ = this->create_publisher<sensor_msgs::msg::JointState>(output_topic_, 10);
-    joint_state_sub_ = this->create_subscription<sensor_msgs::msg::JointState>(
+    estimated_state_sub_ = this->create_subscription<rb_controller::msg::EstimatedState>(
         input_topic_, 10,
-        std::bind(&RbControllerNode::on_joint_state, this, std::placeholders::_1));
-    imu_sub_ = this->create_subscription<sensor_msgs::msg::Imu>(
-        imu_topic_, 20, std::bind(&RbControllerNode::on_imu, this, std::placeholders::_1));
+        std::bind(&RbControllerNode::on_estimated_state, this, std::placeholders::_1));
 
     // wall-time 기반 고정 주기 타이머(best-effort)
     using namespace std::chrono;
@@ -318,7 +313,7 @@ public:
 
     RCLCPP_INFO(
         this->get_logger(),
-        "rb_controller started: rate=%.1fHz expected_dt=%.6fs input=%s output=%s joint_names(init)=%zu signal_mode=%s target_joint=%s amp=%.3f freq=%.3f stand_kp=%.3f stand_kd=%.3f stand_limit=%.3f",
+        "rb_controller started: rate=%.1fHz expected_dt=%.6fs estimated_state=%s output=%s joint_names(init)=%zu signal_mode=%s target_joint=%s amp=%.3f freq=%.3f stand_kp=%.3f stand_kd=%.3f stand_limit=%.3f",
         control_rate_hz_, expected_dt_sec_, input_topic_.c_str(), output_topic_.c_str(), joint_names_.size(),
         signal_mode_.c_str(), target_joint_.c_str(), effort_amplitude_, effort_frequency_hz_,
         stand_kp_, stand_kd_, stand_effort_abs_max_);
@@ -345,8 +340,8 @@ public:
         stand_kd_scale_hip_, stand_kd_scale_knee_, stand_kd_scale_ankle_, stand_kd_scale_torso_, stand_kd_scale_other_);
     RCLCPP_INFO(
         this->get_logger(),
-        "tilt_feedback=%s mode=%s imu_frame_mode=%s imu_topic=%s imu_zero_on_start=%s kp_roll=%.3f kd_roll=%.3f kp_pitch=%.3f kd_pitch=%.3f deadband=%.4f max_effort=%.3f qref_bias_max=%.3f sign(r/p)=%.1f/%.1f weights roll(h/a/t)=%.2f/%.2f/%.2f pitch(h/a/k/t)=%.2f/%.2f/%.2f/%.2f",
-        enable_tilt_feedback_ ? "on" : "off", tilt_apply_mode_.c_str(), imu_frame_mode_.c_str(), imu_topic_.c_str(), imu_zero_on_start_ ? "on" : "off",
+        "tilt_feedback=%s mode=%s estimator_frame_hint=%s estimator_zero_hint=%s kp_roll=%.3f kd_roll=%.3f kp_pitch=%.3f kd_pitch=%.3f deadband=%.4f max_effort=%.3f qref_bias_max=%.3f sign(r/p)=%.1f/%.1f weights roll(h/a/t)=%.2f/%.2f/%.2f pitch(h/a/k/t)=%.2f/%.2f/%.2f/%.2f",
+        enable_tilt_feedback_ ? "on" : "off", tilt_apply_mode_.c_str(), imu_frame_mode_.c_str(), imu_zero_on_start_ ? "on" : "off",
         tilt_kp_roll_, tilt_kd_roll_, tilt_kp_pitch_, tilt_kd_pitch_,
         tilt_deadband_rad_, tilt_effort_abs_max_, tilt_qref_bias_abs_max_, tilt_roll_sign_, tilt_pitch_sign_,
         tilt_weight_roll_hip_, tilt_weight_roll_ankle_, tilt_weight_roll_torso_,
@@ -355,22 +350,19 @@ public:
 
 private:
   /**
-   * @brief /rb/joint_states에서 joint name/position/velocity를 캐시한다.
-   * @param msg 수신된 JointState 메시지
+   * @brief /rb/estimated_state에서 조인트/기울기 상태를 캐시한다.
+   * @param msg 수신된 EstimatedState 메시지
    */
-  // /rb/joint_states 수신 콜백: 조인트 상태 캐시를 최신 상태로 유지
-  void on_joint_state(const sensor_msgs::msg::JointState::SharedPtr msg)
+  void on_estimated_state(const rb_controller::msg::EstimatedState::SharedPtr msg)
   {
-    // name[]이 비어 있으면 순서 정합에 사용할 수 없어서 무시
-    if (!msg || msg->name.empty())
+    if (!msg || msg->joint_names.empty())
     {
       return;
     }
 
-    // 조인트 이름/순서가 바뀌면 갱신
-    if (joint_names_ != msg->name)
+    if (joint_names_ != msg->joint_names)
     {
-      joint_names_ = msg->name;
+      joint_names_ = msg->joint_names;
       stand_reference_ready_ = false;
       stand_control_mask_ready_ = false;
       stand_gain_map_ready_ = false;
@@ -380,44 +372,33 @@ private:
       limit_avoid_invalid_warned_ = false;
       RCLCPP_INFO(
           this->get_logger(),
-          "joint_names updated from /rb/joint_states: count=%zu", joint_names_.size());
+          "joint_names updated from /rb/estimated_state: count=%zu", joint_names_.size());
     }
 
-    latest_joint_positions_.assign(joint_names_.size(), 0.0);
-    const std::size_t pos_count = std::min(joint_names_.size(), msg->position.size());
+    estimated_state_.joint_positions.assign(joint_names_.size(), 0.0);
+    const std::size_t pos_count = std::min(joint_names_.size(), msg->joint_positions.size());
     for (std::size_t i = 0; i < pos_count; ++i)
     {
-      latest_joint_positions_[i] = msg->position[i];
+      estimated_state_.joint_positions[i] = msg->joint_positions[i];
     }
 
-    latest_joint_velocities_.assign(joint_names_.size(), 0.0);
-    const std::size_t vel_count = std::min(joint_names_.size(), msg->velocity.size());
+    estimated_state_.joint_velocities.assign(joint_names_.size(), 0.0);
+    const std::size_t vel_count = std::min(joint_names_.size(), msg->joint_velocities.size());
     for (std::size_t i = 0; i < vel_count; ++i)
     {
-      latest_joint_velocities_[i] = msg->velocity[i];
-    }
-    joint_state_received_ = true;
-  }
-
-  /**
-   * @brief /rb/imu에서 roll/pitch와 각속도를 캐시한다.
-   * @param msg 수신된 IMU 메시지
-   */
-  void on_imu(const sensor_msgs::msg::Imu::SharedPtr msg)
-  {
-    if (!msg)
-    {
-      return;
+      estimated_state_.joint_velocities[i] = msg->joint_velocities[i];
     }
 
-    const auto update = tilt_observer_.update_from_imu(*msg);
-    if (update.bias_captured_now)
-    {
-      RCLCPP_INFO(
-          this->get_logger(),
-          "imu bias captured: raw_roll=%.3f raw_pitch=%.3f bias_roll=%.3f bias_pitch=%.3f",
-          update.raw_roll_rad, update.raw_pitch_rad, update.bias_roll_rad, update.bias_pitch_rad);
-    }
+    estimated_state_.imu_raw_roll_rad = msg->raw_roll_rad;
+    estimated_state_.imu_raw_pitch_rad = msg->raw_pitch_rad;
+    estimated_state_.imu_bias_roll_rad = msg->bias_roll_rad;
+    estimated_state_.imu_bias_pitch_rad = msg->bias_pitch_rad;
+    estimated_state_.tilt_roll_rad = msg->tilt_roll_rad;
+    estimated_state_.tilt_pitch_rad = msg->tilt_pitch_rad;
+    estimated_state_.roll_rate_rad_s = msg->roll_rate_rad_s;
+    estimated_state_.pitch_rate_rad_s = msg->pitch_rate_rad_s;
+    estimated_state_.imu_frame_mode = msg->imu_frame_mode.empty() ? imu_frame_mode_ : msg->imu_frame_mode;
+    estimated_state_.received = true;
   }
 
   /**
@@ -431,17 +412,17 @@ private:
     const auto now_steady = std::chrono::steady_clock::now();
 
     // 루프 간격(dt) 측정 및 miss 카운트
-    if (steady_prev_tick_ != std::chrono::steady_clock::time_point::min())
+    if (runtime_state_.steady_prev_tick != std::chrono::steady_clock::time_point::min())
     {
-      const double dt_sec = std::chrono::duration<double>(now_steady - steady_prev_tick_).count();
-      dt_samples_sec_.push_back(dt_sec);
+      const double dt_sec = std::chrono::duration<double>(now_steady - runtime_state_.steady_prev_tick).count();
+      runtime_state_.dt_samples_sec.push_back(dt_sec);
       if (dt_sec > expected_dt_sec_ * miss_ratio_threshold_)
       {
-        ++miss_count_total_;
-        ++miss_count_window_;
+        ++runtime_state_.miss_count_total;
+        ++runtime_state_.miss_count_window;
       }
     }
-    steady_prev_tick_ = now_steady;
+    runtime_state_.steady_prev_tick = now_steady;
 
     // Sim-to-Real 트랙은 effort-only 명령 경로를 기준으로 한다.
     // position/velocity 배열을 0으로 채우면 articulation이 다중 인터페이스 명령을 동시에
@@ -454,20 +435,20 @@ private:
     cmd_msg.effort.assign(joint_count, 0.0);
     last_stand_output_scale_ = 1.0;
     // 관측용 스냅샷은 매 주기 초기화 후, 실제로 적용된 값만 채운다.
-    tilt_debug_snapshot_ = rbci::TiltDebugSnapshot{};
+    runtime_state_.tilt_debug = rbci::TiltDebugSnapshot{};
     reset_pitch_chain_debug_snapshot();
     reset_ankle_effort_debug_snapshot();
 
-    if (!control_active_logged_ && joint_state_received_ && tilt_observer_.received())
+    if (!runtime_state_.control_active_logged && estimated_state_.received)
     {
-      control_active_logged_ = true;
+      runtime_state_.control_active_logged = true;
       rbci::ControlActiveSnapshot snapshot;
       snapshot.joint_count = joint_names_.size();
-      snapshot.imu_raw_roll_rad = tilt_observer_.raw_roll_rad();
-      snapshot.imu_raw_pitch_rad = tilt_observer_.raw_pitch_rad();
-      snapshot.tilt_roll_rad = tilt_observer_.tilt_roll_rad();
-      snapshot.tilt_pitch_rad = tilt_observer_.tilt_pitch_rad();
-      snapshot.imu_frame_mode = imu_frame_mode_;
+      snapshot.imu_raw_roll_rad = estimated_state_.imu_raw_roll_rad;
+      snapshot.imu_raw_pitch_rad = estimated_state_.imu_raw_pitch_rad;
+      snapshot.tilt_roll_rad = estimated_state_.tilt_roll_rad;
+      snapshot.tilt_pitch_rad = estimated_state_.tilt_pitch_rad;
+      snapshot.imu_frame_mode = estimated_state_.imu_frame_mode;
       RCLCPP_INFO(this->get_logger(), "%s", rbci::format_control_active_sync(snapshot).c_str());
     }
 
@@ -477,19 +458,19 @@ private:
     {
       RCLCPP_WARN_THROTTLE(
           this->get_logger(), *this->get_clock(), 5000,
-          "joint_names is empty. Waiting for /rb/joint_states names before meaningful command publication.");
+          "joint_names is empty. Waiting for /rb/estimated_state before meaningful command publication.");
     }
 
     command_pub_->publish(cmd_msg);
 
     // 설정한 주기(log_interval_sec)마다 타이밍 통계를 출력
-    const double log_elapsed = std::chrono::duration<double>(now_steady - steady_last_log_).count();
+    const double log_elapsed = std::chrono::duration<double>(now_steady - runtime_state_.steady_last_log).count();
     if (log_elapsed >= log_interval_sec_)
     {
       log_timing_stats();
-      steady_last_log_ = now_steady;
-      dt_samples_sec_.clear();
-      miss_count_window_ = 0;
+      runtime_state_.steady_last_log = now_steady;
+      runtime_state_.dt_samples_sec.clear();
+      runtime_state_.miss_count_window = 0;
     }
   }
 
@@ -501,13 +482,13 @@ private:
   std::string summarize_top_stand_error_joints(std::size_t top_n) const
   {
     if (top_n == 0U || signal_mode_ != "stand_pd" ||
-        !joint_state_received_ || !stand_reference_ready_ || !stand_control_mask_ready_)
+        !estimated_state_.received || !stand_reference_ready_ || !stand_control_mask_ready_)
     {
       return "-";
     }
 
     const std::size_t usable_count = std::min(
-        std::min(joint_names_.size(), latest_joint_positions_.size()),
+        std::min(joint_names_.size(), estimated_state_.joint_positions.size()),
         std::min(stand_q_ref_active_.size(), stand_control_mask_.size()));
     if (usable_count == 0U)
     {
@@ -522,7 +503,7 @@ private:
       {
         continue;
       }
-      const double error = stand_q_ref_active_[i] - latest_joint_positions_[i];
+      const double error = stand_q_ref_active_[i] - estimated_state_.joint_positions[i];
       abs_error_and_index.emplace_back(std::abs(error), i);
     }
     if (abs_error_and_index.empty())
@@ -540,7 +521,7 @@ private:
     for (std::size_t rank = 0; rank < take_n; ++rank)
     {
       const std::size_t i = abs_error_and_index[rank].second;
-      const double signed_error = stand_q_ref_active_[i] - latest_joint_positions_[i];
+      const double signed_error = stand_q_ref_active_[i] - estimated_state_.joint_positions[i];
       if (rank > 0U)
       {
         oss << ",";
@@ -553,41 +534,37 @@ private:
   void log_timing_stats()
   {
     // 수집된 dt 샘플이 없으면 통계 생략
-    if (dt_samples_sec_.empty())
+    if (runtime_state_.dt_samples_sec.empty())
     {
       RCLCPP_WARN(this->get_logger(), "timing window has no samples yet");
       return;
     }
 
     // dt_mean / dt_max / dt_p95 / miss 카운트 출력
-    const double sum = std::accumulate(dt_samples_sec_.begin(), dt_samples_sec_.end(), 0.0);
-    const double mean = sum / static_cast<double>(dt_samples_sec_.size());
-    const double max_dt = *std::max_element(dt_samples_sec_.begin(), dt_samples_sec_.end());
-    const double p95 = percentile(dt_samples_sec_, 0.95);
+    const double sum = std::accumulate(runtime_state_.dt_samples_sec.begin(), runtime_state_.dt_samples_sec.end(), 0.0);
+    const double mean = sum / static_cast<double>(runtime_state_.dt_samples_sec.size());
+    const double max_dt = *std::max_element(runtime_state_.dt_samples_sec.begin(), runtime_state_.dt_samples_sec.end());
+    const double p95 = percentile(runtime_state_.dt_samples_sec, 0.95);
     const std::string top_error = summarize_top_stand_error_joints(stand_debug_top_error_count_);
 
     rbci::LoopStatsSnapshot snapshot;
     snapshot.dt_mean = mean;
     snapshot.dt_max = max_dt;
     snapshot.dt_p95 = p95;
-    snapshot.miss_window = miss_count_window_;
-    snapshot.miss_total = miss_count_total_;
-    snapshot.samples = dt_samples_sec_.size();
-    snapshot.imu_raw_roll_rad =
-        tilt_observer_.received() ? tilt_observer_.raw_roll_rad() : std::numeric_limits<double>::quiet_NaN();
-    snapshot.imu_raw_pitch_rad =
-        tilt_observer_.received() ? tilt_observer_.raw_pitch_rad() : std::numeric_limits<double>::quiet_NaN();
-    snapshot.imu_bias_roll_rad = tilt_observer_.bias_roll_rad();
-    snapshot.imu_bias_pitch_rad = tilt_observer_.bias_pitch_rad();
-    snapshot.tilt_roll_rad =
-        tilt_observer_.received() ? tilt_observer_.tilt_roll_rad() : std::numeric_limits<double>::quiet_NaN();
-    snapshot.tilt_pitch_rad =
-        tilt_observer_.received() ? tilt_observer_.tilt_pitch_rad() : std::numeric_limits<double>::quiet_NaN();
+    snapshot.miss_window = runtime_state_.miss_count_window;
+    snapshot.miss_total = runtime_state_.miss_count_total;
+    snapshot.samples = runtime_state_.dt_samples_sec.size();
+    snapshot.imu_raw_roll_rad = estimated_state_.imu_raw_roll_rad;
+    snapshot.imu_raw_pitch_rad = estimated_state_.imu_raw_pitch_rad;
+    snapshot.imu_bias_roll_rad = estimated_state_.imu_bias_roll_rad;
+    snapshot.imu_bias_pitch_rad = estimated_state_.imu_bias_pitch_rad;
+    snapshot.tilt_roll_rad = estimated_state_.tilt_roll_rad;
+    snapshot.tilt_pitch_rad = estimated_state_.tilt_pitch_rad;
     snapshot.stand_scale = last_stand_output_scale_;
     snapshot.top_error = top_error;
-    snapshot.tilt_debug = tilt_debug_snapshot_;
-    snapshot.pitch_chain = pitch_chain_debug_snapshot_;
-    snapshot.ankle_effort = ankle_effort_debug_snapshot_;
+    snapshot.tilt_debug = runtime_state_.tilt_debug;
+    snapshot.pitch_chain = runtime_state_.pitch_chain;
+    snapshot.ankle_effort = runtime_state_.ankle_effort;
 
     RCLCPP_INFO(this->get_logger(), "%s", rbci::format_loop_stats(snapshot).c_str());
   }
@@ -638,19 +615,19 @@ private:
     {
       const std::string &name = param.get_name();
 
-      if (name == "control_rate_hz" || name == "input_joint_states_topic" || name == "output_command_raw_topic")
+      if (name == "control_rate_hz" || name == "input_estimated_state_topic" || name == "output_command_raw_topic")
       {
         result.successful = false;
         result.reason = "runtime update not supported for control_rate_hz/topic parameters (restart required)";
         return result;
       }
-      if (name == "input_imu_topic")
+      if (name == "input_imu_topic" || name == "imu_zero_on_start" ||
+          name == "imu_frame_mode" || name == "tilt_axis_mode")
       {
         result.successful = false;
-        result.reason = "runtime update not supported for input_imu_topic (restart required)";
+        result.reason = "IMU estimation parameters moved to rb_estimator (restart required)";
         return result;
       }
-
       if (name == "signal_mode")
       {
         const std::string mode = param.as_string();
@@ -661,14 +638,7 @@ private:
           return result;
         }
         signal_mode_ = mode;
-        excitation_started_ = false;
-        continue;
-      }
-      if (name == "imu_zero_on_start")
-      {
-        imu_zero_on_start_ = param.as_bool();
-        tilt_observer_.set_zero_on_start(imu_zero_on_start_);
-        tilt_observer_.reset_bias();
+        runtime_state_.excitation_started = false;
         continue;
       }
       if (name == "target_joint")
@@ -691,7 +661,7 @@ private:
           return result;
         }
         effort_frequency_hz_ = v;
-        excitation_started_ = false;
+        runtime_state_.excitation_started = false;
         continue;
       }
       if (name == "step_start_sec")
@@ -704,7 +674,7 @@ private:
           return result;
         }
         step_start_sec_ = v;
-        excitation_started_ = false;
+        runtime_state_.excitation_started = false;
         continue;
       }
       if (name == "stand_kp")
@@ -1128,26 +1098,6 @@ private:
         tilt_apply_mode_ = v;
         continue;
       }
-      if (name == "imu_frame_mode" || name == "tilt_axis_mode")
-      {
-        const std::string v = param.as_string();
-        const std::string resolved = resolve_imu_frame_mode(v);
-        if (resolved.empty())
-        {
-          result.successful = false;
-          result.reason = "imu_frame_mode must be 'identity' or 'g1_imu_link' (legacy: standard/swap_rp)";
-          return result;
-        }
-        if (name == "tilt_axis_mode")
-        {
-          RCLCPP_WARN(
-              this->get_logger(),
-              "runtime parameter tilt_axis_mode is deprecated. use imu_frame_mode instead.");
-        }
-        imu_frame_mode_ = resolved;
-        tilt_observer_.set_frame_mode(imu_frame_mode_);
-        continue;
-      }
       if (name == "tilt_qref_bias_abs_max")
       {
         const double v = param.as_double();
@@ -1289,8 +1239,8 @@ private:
         stand_kp_scale_hip_, stand_kp_scale_knee_, stand_kp_scale_ankle_, stand_kp_scale_torso_, stand_kp_scale_other_,
         stand_kd_scale_hip_, stand_kd_scale_knee_, stand_kd_scale_ankle_, stand_kd_scale_torso_, stand_kd_scale_other_,
         enable_tilt_feedback_ ? "on" : "off",
-        tilt_apply_mode_.c_str(), imu_frame_mode_.c_str(),
-        imu_zero_on_start_ ? "on" : "off",
+        tilt_apply_mode_.c_str(), estimated_state_.imu_frame_mode.c_str(),
+        "see rb_estimator",
         tilt_kp_roll_, tilt_kp_pitch_, tilt_kd_roll_, tilt_kd_pitch_,
         tilt_deadband_rad_, tilt_effort_abs_max_, tilt_qref_bias_abs_max_, tilt_roll_sign_, tilt_pitch_sign_,
         tilt_weight_roll_hip_, tilt_weight_roll_ankle_, tilt_weight_roll_torso_,
@@ -1341,13 +1291,13 @@ private:
     }
     const std::size_t idx = static_cast<std::size_t>(std::distance(cmd_msg.name.begin(), it));
 
-    if (!excitation_started_)
+    if (!runtime_state_.excitation_started)
     {
-      excitation_started_ = true;
-      excitation_start_steady_ = now_steady;
+      runtime_state_.excitation_started = true;
+      runtime_state_.excitation_start_steady = now_steady;
     }
     const double elapsed_sec =
-        std::chrono::duration<double>(now_steady - excitation_start_steady_).count();
+        std::chrono::duration<double>(now_steady - runtime_state_.excitation_start_steady).count();
 
     if (signal_mode_ == "sine_effort")
     {
@@ -1374,11 +1324,11 @@ private:
     {
       return false;
     }
-    if (!tilt_observer_.received())
+    if (!estimated_state_.received)
     {
       RCLCPP_WARN_THROTTLE(
           this->get_logger(), *this->get_clock(), 3000,
-          "tilt feedback waiting for /rb/imu samples");
+          "tilt feedback waiting for /rb/estimated_state samples");
       return false;
     }
     if (!ensure_tilt_joint_index_ready())
@@ -1386,8 +1336,8 @@ private:
       return false;
     }
 
-    double roll = tilt_observer_.tilt_roll_rad();
-    double pitch = tilt_observer_.tilt_pitch_rad();
+    double roll = estimated_state_.tilt_roll_rad;
+    double pitch = estimated_state_.tilt_pitch_rad;
     if (std::abs(roll) < tilt_deadband_rad_)
     {
       roll = 0.0;
@@ -1398,9 +1348,9 @@ private:
     }
 
     const double u_roll_raw =
-        tilt_roll_sign_ * ((tilt_kp_roll_ * (-roll)) + (tilt_kd_roll_ * (-tilt_observer_.roll_rate_rad_s())));
+        tilt_roll_sign_ * ((tilt_kp_roll_ * (-roll)) + (tilt_kd_roll_ * (-estimated_state_.roll_rate_rad_s)));
     const double u_pitch_p = tilt_pitch_sign_ * (tilt_kp_pitch_ * (-pitch));
-    const double u_pitch_d = tilt_pitch_sign_ * (tilt_kd_pitch_ * (-tilt_observer_.pitch_rate_rad_s()));
+    const double u_pitch_d = tilt_pitch_sign_ * (tilt_kd_pitch_ * (-estimated_state_.pitch_rate_rad_s));
     const double u_pitch_raw = u_pitch_p + u_pitch_d;
 
     double u_roll = u_roll_raw;
@@ -1442,16 +1392,16 @@ private:
     cmd.pitch_w_knee = tilt_weight_pitch_knee_ * pitch_norm;
     cmd.pitch_w_torso = tilt_weight_pitch_torso_ * pitch_norm;
 
-    tilt_debug_snapshot_.pitch_input_rad = pitch;
-    tilt_debug_snapshot_.pitch_rate_rad_s = tilt_observer_.pitch_rate_rad_s();
-    tilt_debug_snapshot_.u_pitch_p_term = u_pitch_p;
-    tilt_debug_snapshot_.u_pitch_d_term = u_pitch_d;
-    tilt_debug_snapshot_.u_pitch_raw = u_pitch_raw;
-    tilt_debug_snapshot_.u_pitch_clamped = u_pitch;
-    tilt_debug_snapshot_.pitch_alloc_hip = u_pitch * cmd.pitch_w_hip;
-    tilt_debug_snapshot_.pitch_alloc_ankle = u_pitch * cmd.pitch_w_ankle;
-    tilt_debug_snapshot_.pitch_alloc_knee = u_pitch * cmd.pitch_w_knee;
-    tilt_debug_snapshot_.pitch_alloc_torso = u_pitch * cmd.pitch_w_torso;
+    runtime_state_.tilt_debug.pitch_input_rad = pitch;
+    runtime_state_.tilt_debug.pitch_rate_rad_s = estimated_state_.pitch_rate_rad_s;
+    runtime_state_.tilt_debug.u_pitch_p_term = u_pitch_p;
+    runtime_state_.tilt_debug.u_pitch_d_term = u_pitch_d;
+    runtime_state_.tilt_debug.u_pitch_raw = u_pitch_raw;
+    runtime_state_.tilt_debug.u_pitch_clamped = u_pitch;
+    runtime_state_.tilt_debug.pitch_alloc_hip = u_pitch * cmd.pitch_w_hip;
+    runtime_state_.tilt_debug.pitch_alloc_ankle = u_pitch * cmd.pitch_w_ankle;
+    runtime_state_.tilt_debug.pitch_alloc_knee = u_pitch * cmd.pitch_w_knee;
+    runtime_state_.tilt_debug.pitch_alloc_torso = u_pitch * cmd.pitch_w_torso;
     return true;
   }
 
@@ -1533,12 +1483,12 @@ private:
 
   void reset_pitch_chain_debug_snapshot()
   {
-    pitch_chain_debug_snapshot_ = rbci::PitchChainDebugSnapshot{};
+    runtime_state_.pitch_chain = rbci::PitchChainDebugSnapshot{};
   }
 
   void reset_ankle_effort_debug_snapshot()
   {
-    ankle_effort_debug_snapshot_ = rbci::AnkleEffortDebugSnapshot{};
+    runtime_state_.ankle_effort = rbci::AnkleEffortDebugSnapshot{};
   }
 
   static double read_joint_value_or_nan(const std::vector<double> &values, int idx)
@@ -1619,36 +1569,36 @@ private:
   void capture_pitch_chain_debug_snapshot(
       const std::vector<double> &effective_q_ref, const rbci::TiltFeedbackCommand *tilt_cmd)
   {
-    pitch_chain_debug_snapshot_.torso_ref = read_joint_value_or_nan(effective_q_ref, idx_torso_);
-    pitch_chain_debug_snapshot_.torso_meas = read_joint_value_or_nan(latest_joint_positions_, idx_torso_);
-    pitch_chain_debug_snapshot_.hip_ref_avg =
+    runtime_state_.pitch_chain.torso_ref = read_joint_value_or_nan(effective_q_ref, idx_torso_);
+    runtime_state_.pitch_chain.torso_meas = read_joint_value_or_nan(estimated_state_.joint_positions, idx_torso_);
+    runtime_state_.pitch_chain.hip_ref_avg =
         average_joint_pair_or_nan(effective_q_ref, idx_left_hip_pitch_, idx_right_hip_pitch_);
-    pitch_chain_debug_snapshot_.hip_meas_avg =
-        average_joint_pair_or_nan(latest_joint_positions_, idx_left_hip_pitch_, idx_right_hip_pitch_);
-    pitch_chain_debug_snapshot_.knee_ref_avg =
+    runtime_state_.pitch_chain.hip_meas_avg =
+        average_joint_pair_or_nan(estimated_state_.joint_positions, idx_left_hip_pitch_, idx_right_hip_pitch_);
+    runtime_state_.pitch_chain.knee_ref_avg =
         average_joint_pair_or_nan(effective_q_ref, idx_left_knee_, idx_right_knee_);
-    pitch_chain_debug_snapshot_.knee_meas_avg =
-        average_joint_pair_or_nan(latest_joint_positions_, idx_left_knee_, idx_right_knee_);
-    pitch_chain_debug_snapshot_.ankle_ref_avg =
+    runtime_state_.pitch_chain.knee_meas_avg =
+        average_joint_pair_or_nan(estimated_state_.joint_positions, idx_left_knee_, idx_right_knee_);
+    runtime_state_.pitch_chain.ankle_ref_avg =
         average_joint_pair_or_nan(effective_q_ref, idx_left_ankle_pitch_, idx_right_ankle_pitch_);
-    pitch_chain_debug_snapshot_.ankle_meas_avg =
-        average_joint_pair_or_nan(latest_joint_positions_, idx_left_ankle_pitch_, idx_right_ankle_pitch_);
+    runtime_state_.pitch_chain.ankle_meas_avg =
+        average_joint_pair_or_nan(estimated_state_.joint_positions, idx_left_ankle_pitch_, idx_right_ankle_pitch_);
     if (tilt_cmd == nullptr)
     {
-      pitch_chain_debug_snapshot_.bias_torso = 0.0;
-      pitch_chain_debug_snapshot_.bias_hip = 0.0;
-      pitch_chain_debug_snapshot_.bias_knee = 0.0;
-      pitch_chain_debug_snapshot_.bias_ankle = 0.0;
+      runtime_state_.pitch_chain.bias_torso = 0.0;
+      runtime_state_.pitch_chain.bias_hip = 0.0;
+      runtime_state_.pitch_chain.bias_knee = 0.0;
+      runtime_state_.pitch_chain.bias_ankle = 0.0;
       return;
     }
 
-    pitch_chain_debug_snapshot_.bias_hip = average_applied_qref_bias_or_nan(
+    runtime_state_.pitch_chain.bias_hip = average_applied_qref_bias_or_nan(
         idx_left_hip_pitch_, idx_right_hip_pitch_, tilt_cmd->u_pitch * tilt_cmd->pitch_w_hip);
-    pitch_chain_debug_snapshot_.bias_knee = average_applied_qref_bias_or_nan(
+    runtime_state_.pitch_chain.bias_knee = average_applied_qref_bias_or_nan(
         idx_left_knee_, idx_right_knee_, tilt_cmd->u_pitch * tilt_cmd->pitch_w_knee);
-    pitch_chain_debug_snapshot_.bias_ankle = average_applied_qref_bias_or_nan(
+    runtime_state_.pitch_chain.bias_ankle = average_applied_qref_bias_or_nan(
         idx_left_ankle_pitch_, idx_right_ankle_pitch_, tilt_cmd->u_pitch * tilt_cmd->pitch_w_ankle);
-    pitch_chain_debug_snapshot_.bias_torso =
+    runtime_state_.pitch_chain.bias_torso =
         applied_qref_bias_or_nan(idx_torso_, tilt_cmd->u_pitch * tilt_cmd->pitch_w_torso);
   }
 
@@ -1660,11 +1610,11 @@ private:
   void apply_stand_pd(sensor_msgs::msg::JointState &cmd_msg)
   {
     last_stand_output_scale_ = 1.0;
-    if (!joint_state_received_)
+    if (!estimated_state_.received)
     {
       RCLCPP_WARN_THROTTLE(
           this->get_logger(), *this->get_clock(), 3000,
-          "stand_pd waiting for /rb/joint_states samples");
+          "stand_pd waiting for /rb/estimated_state samples");
       return;
     }
 
@@ -1690,8 +1640,8 @@ private:
     std::vector<double> effective_q_ref = stand_q_ref_active_;
 
     const std::size_t usable_count = std::min(
-        std::min(cmd_msg.effort.size(), latest_joint_positions_.size()),
-        std::min(latest_joint_velocities_.size(), stand_q_ref_active_.size()));
+        std::min(cmd_msg.effort.size(), estimated_state_.joint_positions.size()),
+        std::min(estimated_state_.joint_velocities.size(), stand_q_ref_active_.size()));
 
     rbci::TiltFeedbackCommand tilt_cmd;
     const bool has_tilt_cmd = compute_tilt_feedback_command(tilt_cmd);
@@ -1716,17 +1666,17 @@ private:
         continue;
       }
 
-      double position_error = effective_q_ref[i] - latest_joint_positions_[i];
+      double position_error = effective_q_ref[i] - estimated_state_.joint_positions[i];
       if (stand_pos_error_abs_max_ > 0.0)
       {
         position_error = std::clamp(position_error, -stand_pos_error_abs_max_, stand_pos_error_abs_max_);
       }
-      const double damping_term = -latest_joint_velocities_[i];
+      const double damping_term = -estimated_state_.joint_velocities[i];
       const double kp_eff = stand_kp_ * stand_kp_scale_per_joint_[i];
       const double kd_eff = stand_kd_ * stand_kd_scale_per_joint_[i];
       const double effort_pd = (kp_eff * position_error) + (kd_eff * damping_term);
       const double effort_limit_avoid =
-          compute_limit_avoid_effort(i, latest_joint_positions_[i], latest_joint_velocities_[i]);
+          compute_limit_avoid_effort(i, estimated_state_.joint_positions[i], estimated_state_.joint_velocities[i]);
       const double effort_pre_clamp = (effort_pd + effort_limit_avoid) * stand_output_scale;
       double effort_cmd = effort_pre_clamp;
       if (stand_effort_abs_max_ > 0.0)
@@ -1780,11 +1730,11 @@ private:
     accumulate_final_ankle(idx_right_ankle_pitch_);
 
     const double ankle_count = static_cast<double>(ankle_sample_count);
-    ankle_effort_debug_snapshot_.pd_avg = ankle_pd_sum / ankle_count;
-    ankle_effort_debug_snapshot_.limit_avg = ankle_limit_sum / ankle_count;
-    ankle_effort_debug_snapshot_.pre_clamp_avg = ankle_pre_clamp_sum / ankle_count;
-    ankle_effort_debug_snapshot_.cmd_avg = ankle_cmd_sum / ankle_count;
-    ankle_effort_debug_snapshot_.sat_count = ankle_sat_count;
+    runtime_state_.ankle_effort.pd_avg = ankle_pd_sum / ankle_count;
+    runtime_state_.ankle_effort.limit_avg = ankle_limit_sum / ankle_count;
+    runtime_state_.ankle_effort.pre_clamp_avg = ankle_pre_clamp_sum / ankle_count;
+    runtime_state_.ankle_effort.cmd_avg = ankle_cmd_sum / ankle_count;
+    runtime_state_.ankle_effort.sat_count = ankle_sat_count;
   }
 
   /**
@@ -1800,16 +1750,16 @@ private:
       stand_tilt_cut_active_ = false;
       return 1.0;
     }
-    if (!tilt_observer_.received())
+    if (!estimated_state_.received)
     {
       RCLCPP_WARN_THROTTLE(
           this->get_logger(), *this->get_clock(), 3000,
-          "stand_tilt_cut enabled but /rb/imu is not ready yet");
+          "stand_tilt_cut enabled but /rb/estimated_state is not ready yet");
       return 1.0;
     }
 
     const double tilt_abs = std::max(
-        std::abs(tilt_observer_.tilt_roll_rad()), std::abs(tilt_observer_.tilt_pitch_rad()));
+        std::abs(estimated_state_.tilt_roll_rad), std::abs(estimated_state_.tilt_pitch_rad));
     if (!stand_tilt_cut_active_)
     {
       if (tilt_abs >= stand_tilt_cut_rad_)
@@ -1844,13 +1794,10 @@ private:
     {
       return true;
     }
-    if (joint_names_.empty())
-    {
-      return false;
-    }
 
-    const std::size_t n = limit_avoid_joint_names_param_.size();
-    if (n == 0U || limit_avoid_lower_param_.size() != n || limit_avoid_upper_param_.size() != n)
+    const auto result = rbci::build_limit_avoid_map(
+        joint_names_, limit_avoid_joint_names_param_, limit_avoid_lower_param_, limit_avoid_upper_param_);
+    if (result.invalid_table)
     {
       if (!limit_avoid_invalid_warned_)
       {
@@ -1864,33 +1811,7 @@ private:
       }
       return false;
     }
-
-    limit_avoid_lower_per_joint_.assign(joint_names_.size(), 0.0);
-    limit_avoid_upper_per_joint_.assign(joint_names_.size(), 0.0);
-    limit_avoid_mask_.assign(joint_names_.size(), 0U);
-
-    std::size_t mapped = 0U;
-    for (std::size_t i = 0; i < n; ++i)
-    {
-      const auto it = std::find(joint_names_.begin(), joint_names_.end(), limit_avoid_joint_names_param_[i]);
-      if (it == joint_names_.end())
-      {
-        continue;
-      }
-      const std::size_t idx = static_cast<std::size_t>(std::distance(joint_names_.begin(), it));
-      const double lo = limit_avoid_lower_param_[i];
-      const double hi = limit_avoid_upper_param_[i];
-      if (hi <= lo)
-      {
-        continue;
-      }
-      limit_avoid_lower_per_joint_[idx] = lo;
-      limit_avoid_upper_per_joint_[idx] = hi;
-      limit_avoid_mask_[idx] = 1U;
-      ++mapped;
-    }
-
-    if (mapped == 0U)
+    if (result.no_joint_match)
     {
       if (!limit_avoid_invalid_warned_)
       {
@@ -1901,12 +1822,19 @@ private:
       }
       return false;
     }
+    if (!result.ready)
+    {
+      return false;
+    }
 
+    limit_avoid_lower_per_joint_ = result.lower_per_joint;
+    limit_avoid_upper_per_joint_ = result.upper_per_joint;
+    limit_avoid_mask_ = result.mask;
     limit_avoid_map_ready_ = true;
     RCLCPP_INFO(
         this->get_logger(),
         "limit_avoid map ready: mapped=%zu/%zu margin=%.4f kp=%.3f kd=%.3f",
-        mapped, joint_names_.size(), limit_avoid_margin_rad_, limit_avoid_kp_, limit_avoid_kd_);
+        result.mapped_count, joint_names_.size(), limit_avoid_margin_rad_, limit_avoid_kp_, limit_avoid_kd_);
     return true;
   }
 
@@ -1974,71 +1902,51 @@ private:
       return true;
     }
 
-    if (joint_names_.empty() || latest_joint_positions_.size() != joint_names_.size())
+    const auto result = rbci::build_stand_reference(
+        joint_names_, estimated_state_.joint_positions, stand_q_ref_param_, stand_q_ref_trim_param_, stand_hold_current_on_start_);
+    if (result.q_ref_size_mismatch && !stand_ref_param_size_warned_)
     {
+      stand_ref_param_size_warned_ = true;
+      RCLCPP_WARN(
+          this->get_logger(),
+          "stand_q_ref size mismatch: ref=%zu joint_count=%zu. fallback to current pose=%s",
+          stand_q_ref_param_.size(), joint_names_.size(),
+          stand_hold_current_on_start_ ? "enabled" : "disabled");
+    }
+    if (result.trim_size_mismatch && !stand_ref_trim_param_size_warned_)
+    {
+      stand_ref_trim_param_size_warned_ = true;
+      RCLCPP_WARN(
+          this->get_logger(),
+          "stand_q_ref_trim size mismatch: trim=%zu joint_count=%zu. ignore trim and use baseline stand_q_ref only",
+          stand_q_ref_trim_param_.size(), joint_names_.size());
+    }
+    if (!result.ready)
+    {
+      RCLCPP_WARN_THROTTLE(
+          this->get_logger(), *this->get_clock(), 3000,
+          "stand_pd reference is not ready (provide stand_q_ref or enable stand_hold_current_on_start)");
       return false;
     }
 
-    if (!stand_q_ref_param_.empty())
+    stand_q_ref_active_ = result.values;
+    stand_reference_ready_ = true;
+    if (result.used_current_pose)
     {
-      if (stand_q_ref_param_.size() == joint_names_.size())
-      {
-        stand_q_ref_active_ = stand_q_ref_param_;
-        bool trim_applied = false;
-        if (!stand_q_ref_trim_param_.empty())
-        {
-          if (stand_q_ref_trim_param_.size() == joint_names_.size())
-          {
-            for (std::size_t i = 0; i < stand_q_ref_active_.size(); ++i)
-            {
-              stand_q_ref_active_[i] += stand_q_ref_trim_param_[i];
-            }
-            trim_applied = true;
-          }
-          else if (!stand_ref_trim_param_size_warned_)
-          {
-            stand_ref_trim_param_size_warned_ = true;
-            RCLCPP_WARN(
-                this->get_logger(),
-                "stand_q_ref_trim size mismatch: trim=%zu joint_count=%zu. ignore trim and use baseline stand_q_ref only",
-                stand_q_ref_trim_param_.size(), joint_names_.size());
-          }
-        }
-        stand_reference_ready_ = true;
-        RCLCPP_INFO(
-            this->get_logger(),
-            "stand_pd reference loaded from stand_q_ref baseline%s (count=%zu)",
-            trim_applied ? " + stand_q_ref_trim" : "",
-            stand_q_ref_active_.size());
-        return true;
-      }
-
-      if (!stand_ref_param_size_warned_)
-      {
-        stand_ref_param_size_warned_ = true;
-        RCLCPP_WARN(
-            this->get_logger(),
-            "stand_q_ref size mismatch: ref=%zu joint_count=%zu. fallback to current pose=%s",
-            stand_q_ref_param_.size(), joint_names_.size(),
-            stand_hold_current_on_start_ ? "enabled" : "disabled");
-      }
-    }
-
-    if (stand_hold_current_on_start_)
-    {
-      stand_q_ref_active_ = latest_joint_positions_;
-      stand_reference_ready_ = true;
       RCLCPP_INFO(
           this->get_logger(),
           "stand_pd reference captured from current pose (count=%zu)",
           stand_q_ref_active_.size());
-      return true;
     }
-
-    RCLCPP_WARN_THROTTLE(
-        this->get_logger(), *this->get_clock(), 3000,
-        "stand_pd reference is not ready (provide stand_q_ref or enable stand_hold_current_on_start)");
-    return false;
+    else
+    {
+      RCLCPP_INFO(
+          this->get_logger(),
+          "stand_pd reference loaded from stand_q_ref baseline%s (count=%zu)",
+          result.trim_applied ? " + stand_q_ref_trim" : "",
+          stand_q_ref_active_.size());
+    }
+    return true;
   }
 
   /**
@@ -2052,34 +1960,9 @@ private:
     {
       return true;
     }
-    if (joint_names_.empty())
-    {
-      return false;
-    }
 
-    stand_control_mask_.assign(joint_names_.size(), 0U);
-
-    if (stand_control_joints_param_.empty())
-    {
-      std::fill(stand_control_mask_.begin(), stand_control_mask_.end(), 1U);
-      stand_control_mask_ready_ = true;
-      return true;
-    }
-
-    std::unordered_set<std::string> requested(
-        stand_control_joints_param_.begin(), stand_control_joints_param_.end());
-    std::size_t matched_count = 0;
-    for (std::size_t i = 0; i < joint_names_.size(); ++i)
-    {
-      if (requested.find(joint_names_[i]) != requested.end())
-      {
-        stand_control_mask_[i] = 1U;
-        ++matched_count;
-        requested.erase(joint_names_[i]);
-      }
-    }
-
-    if (matched_count == 0U)
+    const auto result = rbci::build_stand_control_mask(joint_names_, stand_control_joints_param_);
+    if (!result.ready)
     {
       RCLCPP_WARN_THROTTLE(
           this->get_logger(), *this->get_clock(), 3000,
@@ -2087,20 +1970,24 @@ private:
       return false;
     }
 
-    if (!requested.empty() && !stand_control_unknown_warned_)
+    stand_control_mask_ = result.mask;
+    if (!result.unknown_names.empty() && !stand_control_unknown_warned_)
     {
       stand_control_unknown_warned_ = true;
       RCLCPP_WARN(
           this->get_logger(),
           "stand_control_joints contains %zu unknown names (ignored). matched=%zu/%zu",
-          requested.size(), matched_count, joint_names_.size());
+          result.unknown_names.size(), result.matched_count, joint_names_.size());
     }
 
     stand_control_mask_ready_ = true;
-    RCLCPP_INFO(
-        this->get_logger(),
-        "stand_control_joints active: matched=%zu / total=%zu",
-        matched_count, joint_names_.size());
+    if (!result.all_joints)
+    {
+      RCLCPP_INFO(
+          this->get_logger(),
+          "stand_control_joints active: matched=%zu / total=%zu",
+          result.matched_count, joint_names_.size());
+    }
     return true;
   }
 
@@ -2120,58 +2007,23 @@ private:
     {
       return true;
     }
-    if (joint_names_.empty())
+
+    const auto result = rbci::build_stand_gain_map(
+        joint_names_,
+        stand_kp_scale_hip_, stand_kp_scale_knee_, stand_kp_scale_ankle_, stand_kp_scale_torso_, stand_kp_scale_other_,
+        stand_kd_scale_hip_, stand_kd_scale_knee_, stand_kd_scale_ankle_, stand_kd_scale_torso_, stand_kd_scale_other_);
+    if (!result.ready)
     {
       return false;
     }
 
-    stand_kp_scale_per_joint_.assign(joint_names_.size(), stand_kp_scale_other_);
-    stand_kd_scale_per_joint_.assign(joint_names_.size(), stand_kd_scale_other_);
-
-    std::size_t hip_count = 0;
-    std::size_t knee_count = 0;
-    std::size_t ankle_count = 0;
-    std::size_t torso_count = 0;
-    std::size_t other_count = 0;
-    for (std::size_t i = 0; i < joint_names_.size(); ++i)
-    {
-      const std::string &joint = joint_names_[i];
-      if (joint == "torso_joint")
-      {
-        stand_kp_scale_per_joint_[i] = stand_kp_scale_torso_;
-        stand_kd_scale_per_joint_[i] = stand_kd_scale_torso_;
-        ++torso_count;
-        continue;
-      }
-      if (joint.find("_hip_") != std::string::npos)
-      {
-        stand_kp_scale_per_joint_[i] = stand_kp_scale_hip_;
-        stand_kd_scale_per_joint_[i] = stand_kd_scale_hip_;
-        ++hip_count;
-        continue;
-      }
-      if (joint.find("_knee_") != std::string::npos)
-      {
-        stand_kp_scale_per_joint_[i] = stand_kp_scale_knee_;
-        stand_kd_scale_per_joint_[i] = stand_kd_scale_knee_;
-        ++knee_count;
-        continue;
-      }
-      if (joint.find("_ankle_") != std::string::npos)
-      {
-        stand_kp_scale_per_joint_[i] = stand_kp_scale_ankle_;
-        stand_kd_scale_per_joint_[i] = stand_kd_scale_ankle_;
-        ++ankle_count;
-        continue;
-      }
-      ++other_count;
-    }
-
+    stand_kp_scale_per_joint_ = result.kp_scales;
+    stand_kd_scale_per_joint_ = result.kd_scales;
     stand_gain_map_ready_ = true;
     RCLCPP_INFO(
         this->get_logger(),
         "stand gain map ready: hip=%zu knee=%zu ankle=%zu torso=%zu other=%zu kp_scales=%.2f/%.2f/%.2f/%.2f/%.2f kd_scales=%.2f/%.2f/%.2f/%.2f/%.2f",
-        hip_count, knee_count, ankle_count, torso_count, other_count,
+        result.hip_count, result.knee_count, result.ankle_count, result.torso_count, result.other_count,
         stand_kp_scale_hip_, stand_kp_scale_knee_, stand_kp_scale_ankle_, stand_kp_scale_torso_, stand_kp_scale_other_,
         stand_kd_scale_hip_, stand_kd_scale_knee_, stand_kd_scale_ankle_, stand_kd_scale_torso_, stand_kd_scale_other_);
     return true;
@@ -2187,40 +2039,9 @@ private:
     {
       return true;
     }
-    if (joint_names_.empty())
-    {
-      return false;
-    }
 
-    const auto find_idx = [this](const std::string &name) -> int
-    {
-      const auto it = std::find(joint_names_.begin(), joint_names_.end(), name);
-      if (it == joint_names_.end())
-      {
-        return -1;
-      }
-      return static_cast<int>(std::distance(joint_names_.begin(), it));
-    };
-
-    idx_left_hip_roll_ = find_idx("left_hip_roll_joint");
-    idx_right_hip_roll_ = find_idx("right_hip_roll_joint");
-    idx_left_ankle_roll_ = find_idx("left_ankle_roll_joint");
-    idx_right_ankle_roll_ = find_idx("right_ankle_roll_joint");
-
-    idx_left_hip_pitch_ = find_idx("left_hip_pitch_joint");
-    idx_right_hip_pitch_ = find_idx("right_hip_pitch_joint");
-    idx_left_ankle_pitch_ = find_idx("left_ankle_pitch_joint");
-    idx_right_ankle_pitch_ = find_idx("right_ankle_pitch_joint");
-    idx_left_knee_ = find_idx("left_knee_joint");
-    idx_right_knee_ = find_idx("right_knee_joint");
-    idx_torso_ = find_idx("torso_joint");
-
-    const bool has_roll_pair = (idx_left_hip_roll_ >= 0) && (idx_right_hip_roll_ >= 0);
-    const bool has_pitch_pair =
-        ((idx_left_hip_pitch_ >= 0) && (idx_right_hip_pitch_ >= 0)) ||
-        ((idx_left_ankle_pitch_ >= 0) && (idx_right_ankle_pitch_ >= 0)) ||
-        ((idx_left_knee_ >= 0) && (idx_right_knee_ >= 0));
-    if (!has_roll_pair && !has_pitch_pair)
+    const auto indices = rbci::build_tilt_joint_indices(joint_names_);
+    if (!indices.ready())
     {
       if (!tilt_joint_index_warned_)
       {
@@ -2231,6 +2052,18 @@ private:
       }
       return false;
     }
+
+    idx_left_hip_roll_ = indices.left_hip_roll;
+    idx_right_hip_roll_ = indices.right_hip_roll;
+    idx_left_ankle_roll_ = indices.left_ankle_roll;
+    idx_right_ankle_roll_ = indices.right_ankle_roll;
+    idx_left_hip_pitch_ = indices.left_hip_pitch;
+    idx_right_hip_pitch_ = indices.right_hip_pitch;
+    idx_left_ankle_pitch_ = indices.left_ankle_pitch;
+    idx_right_ankle_pitch_ = indices.right_ankle_pitch;
+    idx_left_knee_ = indices.left_knee;
+    idx_right_knee_ = indices.right_knee;
+    idx_torso_ = indices.torso;
 
     tilt_joint_index_ready_ = true;
     RCLCPP_INFO(
@@ -2315,8 +2148,8 @@ private:
 
   // ===== 상태 캐시/통계 버퍼 =====
   std::vector<std::string> joint_names_;
-  std::vector<double> latest_joint_positions_;
-  std::vector<double> latest_joint_velocities_;
+  rbci::EstimatedStateCache estimated_state_{};
+  rbci::ControllerRuntimeState runtime_state_{};
   std::vector<double> stand_q_ref_active_;
   std::vector<double> stand_kp_scale_per_joint_;
   std::vector<double> stand_kd_scale_per_joint_;
@@ -2324,9 +2157,7 @@ private:
   std::vector<std::uint8_t> limit_avoid_mask_;
   std::vector<double> limit_avoid_lower_per_joint_;
   std::vector<double> limit_avoid_upper_per_joint_;
-  std::vector<double> dt_samples_sec_;
 
-  bool joint_state_received_{false};
   bool stand_reference_ready_{false};
   bool stand_ref_param_size_warned_{false};
   bool stand_ref_trim_param_size_warned_{false};
@@ -2337,14 +2168,8 @@ private:
   bool limit_avoid_map_ready_{false};
   bool limit_avoid_invalid_warned_{false};
   bool imu_zero_on_start_{false};
-  bool control_active_logged_{false};
   bool tilt_joint_index_ready_{false};
   bool tilt_joint_index_warned_{false};
-
-  rbci::TiltObserver tilt_observer_{};
-  rbci::TiltDebugSnapshot tilt_debug_snapshot_{};
-  rbci::PitchChainDebugSnapshot pitch_chain_debug_snapshot_{};
-  rbci::AnkleEffortDebugSnapshot ankle_effort_debug_snapshot_{};
 
   int idx_left_hip_roll_{-1};
   int idx_right_hip_roll_{-1};
@@ -2358,19 +2183,9 @@ private:
   int idx_right_knee_{-1};
   int idx_torso_{-1};
 
-  std::size_t miss_count_total_{0};
-  std::size_t miss_count_window_{0};
-
-  // ===== 시간 기준점 =====
-  std::chrono::steady_clock::time_point steady_prev_tick_;
-  std::chrono::steady_clock::time_point steady_last_log_;
-  std::chrono::steady_clock::time_point excitation_start_steady_;
-  bool excitation_started_{false};
-
   // ===== ROS2 통신 핸들 =====
   rclcpp::Publisher<sensor_msgs::msg::JointState>::SharedPtr command_pub_;
-  rclcpp::Subscription<sensor_msgs::msg::JointState>::SharedPtr joint_state_sub_;
-  rclcpp::Subscription<sensor_msgs::msg::Imu>::SharedPtr imu_sub_;
+  rclcpp::Subscription<rb_controller::msg::EstimatedState>::SharedPtr estimated_state_sub_;
   rclcpp::TimerBase::SharedPtr control_timer_;
   OnSetParametersCallbackHandle::SharedPtr param_callback_handle_;
 };
