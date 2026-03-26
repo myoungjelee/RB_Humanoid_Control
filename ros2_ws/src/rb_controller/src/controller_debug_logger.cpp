@@ -27,7 +27,7 @@ std::string format_loop_stats(const LoopStatsSnapshot &snapshot)
   std::snprintf(
       buffer.data(), buffer.size(),
       "loop_stats dt_mean=%.6f dt_max=%.6f dt_p95=%.6f miss_window=%zu miss_total=%zu samples=%zu "
-      "imu_raw_r=%.3f imu_raw_p=%.3f imu_bias_r=%.3f imu_bias_p=%.3f tilt_r=%.3f tilt_p=%.3f "
+      "imu_raw_r=%.3f imu_raw_p=%.3f tilt_r=%.3f tilt_p=%.3f "
       "stand_scale=%.2f top_err=%s pitch_rate=%.3f u_pitch_raw=%.3f u_pitch=%.3f u_pitch_p=%.3f u_pitch_d=%.3f "
       "alloc_p(h/a/k/t)=%.3f/%.3f/%.3f/%.3f torso_ref=%.3f torso_meas=%.3f hip_pitch_ref_avg=%.3f hip_pitch_meas_avg=%.3f "
       "knee_ref_avg=%.3f knee_meas_avg=%.3f ankle_pitch_ref_avg=%.3f ankle_pitch_meas_avg=%.3f "
@@ -36,7 +36,6 @@ std::string format_loop_stats(const LoopStatsSnapshot &snapshot)
       snapshot.dt_mean, snapshot.dt_max, snapshot.dt_p95,
       snapshot.miss_window, snapshot.miss_total, snapshot.samples,
       snapshot.imu_raw_roll_rad, snapshot.imu_raw_pitch_rad,
-      snapshot.imu_bias_roll_rad, snapshot.imu_bias_pitch_rad,
       snapshot.tilt_roll_rad, snapshot.tilt_pitch_rad,
       snapshot.stand_scale, snapshot.top_error.c_str(),
       snapshot.tilt_debug.pitch_rate_rad_s,

@@ -245,3 +245,14 @@
 - 공개용 문서 세트도 다시 동기화한다. `README`는 포트폴리오 랜딩 페이지 구조를 유지한 채 `final demo video`, `system_architecture`, `milestone_roadview` 자산을 직접 연결하고, `overview / ONE_PAGER / ROADMAP / AGENTS / KIST insert / general insert / VIDEO_CAPTURE_GUIDE`도 같은 milestone 체계와 milestone-first 증빙 경로로 맞춘다. 로컬 최종본 mp4는 `reports/sim2real/video/RB_Humanoid_Control.mp4`로 정리했다.
 - README 최종 마감에서는 구조도와 로드맵을 링크가 아니라 inline 이미지로 직접 노출하고, 시연영상은 mp4 자체 embed 대신 대표 still 이미지를 클릭하면 final demo asset으로 이동하는 방식으로 정리한다.
 - GitHub README 공개본에서는 repo mp4 대신 `user-attachments` 영상 asset(`https://github.com/user-attachments/assets/4e70156b-aca6-4c3a-859f-7526fa2f511e`)을 최종 시연영상으로 사용한다. repo 내부 mp4는 공개 README 링크의 canonical source로 쓰지 않는다.
+
+### 2026-03-26 추가 정리 — IMU startup bias 제거 / M10 진입 준비
+- `imu_zero_on_start`와 startup bias 캡처/차감 경로를 제거했다. 현재 standing baseline은 `imu_frame_mode=g1_imu_link` frame compensation만 사용하고, startup zeroing에는 더 이상 의존하지 않는다.
+- `rb_controller/msg/EstimatedState.msg`에서 `bias_roll_rad`, `bias_pitch_rad`를 제거했다. estimator/controller/debug logger도 같은 방향으로 정리해 `/rb/estimated_state` 계약을 더 단순하게 맞췄다.
+- `controller_tilt_observer.*`, `estimator_node.cpp`, `controller_node.cpp`, `controller.launch.py`, standing 시나리오 YAML에서 bias 관련 파라미터/로그/launch fallback을 제거했다. 즉 현재 구조는 `joint + raw IMU 해석 + frame remap -> tilt/rate`만 남긴 상태다.
+- `colcon build --packages-select rb_controller` 재빌드 통과. 메시지 타입 변경 후에도 estimator/controller/safety 경로가 다시 맞물리는 것까지 확인했다.
+- no-bias sanity 확인도 했다. `logs/sim2real/m7/test_no_bias_20260326_093821/m7/` 기준으로 `CONTROL_ACTIVE` 시점 `tilt_r/p`가 0 근처로 들어왔고, safety-on 60초 관측창에서 `NO_FALL_EVENT`, `NO_SAFETY_REASON`를 다시 확인했다.
+- M8/M9 회귀도 다시 확인했다. `logs/sim2real/m8/test_no_bias_20260326_093821/`, `logs/sim2real/m9/test_no_bias_20260326_093821/summary.md` 기준 현재 representative run은 `115N x 0.10s` disturbance에서 `balance_off/on` 모두 no-fall이고, M9 summary/KPI 생성까지 정상 동작한다.
+- M9 후처리 스크립트 안정화도 같이 했다. `ops/run_m9_kpi.sh`는 모듈 실행(`python3 -m ...`)으로 바꿔 import 경로 문제를 없앴고, `scripts/sim2real/kpi/writers.py`는 optional config 값이 `None`일 때도 `summary.md`를 정상 생성하도록 보강했다.
+- 포트폴리오용 기존 M8/M9 결론(`같은 disturbance에서 OFF fall / ON survive`가 관측된 대표 baseline이 존재한다)은 유지한다. 이번 bias 제거 런은 성능 결론을 다시 덮어쓰는 실험이 아니라, estimator contract 단순화 이후에도 standing/disturbance/KPI 파이프라인이 여전히 정상 동작하는지 보는 회귀 확인으로 취급한다.
+- 다음 초점은 M10이다. 현재 estimator 분리 자체는 끝났고, 다음 단계는 `EstimatedState`를 더 명확한 제어용 상태 계약으로 다듬고, 그 상태를 controller/safety가 더 일관되게 쓰게 만드는 쪽이다.

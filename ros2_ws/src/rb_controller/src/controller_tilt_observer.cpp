@@ -23,34 +23,13 @@ std::string canonicalize_frame_mode(const std::string &mode)
 
 }  // namespace
 
-void TiltObserver::set_zero_on_start(const bool enabled)
-{
-  zero_on_start_ = enabled;
-}
-
 void TiltObserver::set_frame_mode(const std::string &mode)
 {
   frame_mode_ = canonicalize_frame_mode(mode);
 }
 
-void TiltObserver::reset_bias()
+void TiltObserver::update_from_imu(const sensor_msgs::msg::Imu &msg)
 {
-  received_ = false;
-  bias_captured_ = false;
-  tilt_roll_rad_ = 0.0;
-  tilt_pitch_rad_ = 0.0;
-  raw_roll_rad_ = 0.0;
-  raw_pitch_rad_ = 0.0;
-  bias_roll_rad_ = 0.0;
-  bias_pitch_rad_ = 0.0;
-  roll_rate_rad_s_ = 0.0;
-  pitch_rate_rad_s_ = 0.0;
-}
-
-TiltObserverUpdateResult TiltObserver::update_from_imu(const sensor_msgs::msg::Imu &msg)
-{
-  TiltObserverUpdateResult result;
-
   const double x = msg.orientation.x;
   const double y = msg.orientation.y;
   const double z = msg.orientation.z;
@@ -65,26 +44,10 @@ TiltObserverUpdateResult TiltObserver::update_from_imu(const sensor_msgs::msg::I
                            ? std::copysign(1.5707963267948966, sinp)
                            : std::asin(sinp);
 
-  result.raw_roll_rad = roll;
-  result.raw_pitch_rad = pitch;
-
-  if (zero_on_start_ && !bias_captured_)
-  {
-    bias_roll_rad_ = roll;
-    bias_pitch_rad_ = pitch;
-    bias_captured_ = true;
-    result.bias_captured_now = true;
-  }
-
   raw_roll_rad_ = roll;
   raw_pitch_rad_ = pitch;
-  result.bias_roll_rad = bias_roll_rad_;
-  result.bias_pitch_rad = bias_pitch_rad_;
-
-  const double roll_bias = zero_on_start_ ? bias_roll_rad_ : 0.0;
-  const double pitch_bias = zero_on_start_ ? bias_pitch_rad_ : 0.0;
-  const double corrected_roll = normalize_angle_rad(roll - roll_bias);
-  const double corrected_pitch = pitch - pitch_bias;
+  const double corrected_roll = normalize_angle_rad(roll);
+  const double corrected_pitch = pitch;
 
   if (frame_mode_ == "g1_imu_link")
   {
@@ -102,17 +65,11 @@ TiltObserverUpdateResult TiltObserver::update_from_imu(const sensor_msgs::msg::I
   }
 
   received_ = true;
-  return result;
 }
 
 bool TiltObserver::received() const
 {
   return received_;
-}
-
-bool TiltObserver::bias_captured() const
-{
-  return bias_captured_;
 }
 
 double TiltObserver::tilt_roll_rad() const
@@ -133,16 +90,6 @@ double TiltObserver::raw_roll_rad() const
 double TiltObserver::raw_pitch_rad() const
 {
   return raw_pitch_rad_;
-}
-
-double TiltObserver::bias_roll_rad() const
-{
-  return bias_roll_rad_;
-}
-
-double TiltObserver::bias_pitch_rad() const
-{
-  return bias_pitch_rad_;
 }
 
 double TiltObserver::roll_rate_rad_s() const

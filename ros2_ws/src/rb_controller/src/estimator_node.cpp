@@ -42,7 +42,6 @@ public:
         this->declare_parameter<std::string>("input_imu_topic", "/rb/imu");
     output_estimated_state_topic_ =
         this->declare_parameter<std::string>("output_estimated_state_topic", "/rb/estimated_state");
-    imu_zero_on_start_ = this->declare_parameter<bool>("imu_zero_on_start", false);
     imu_frame_mode_ = this->declare_parameter<std::string>("imu_frame_mode", "identity");
     const auto legacy_tilt_axis_mode =
         this->declare_parameter<std::string>("tilt_axis_mode", "");
@@ -88,7 +87,6 @@ public:
       }
     }
 
-    tilt_observer_.set_zero_on_start(imu_zero_on_start_);
     tilt_observer_.set_frame_mode(imu_frame_mode_);
 
     estimated_state_pub_ = this->create_publisher<rb_controller::msg::EstimatedState>(
@@ -105,10 +103,9 @@ public:
 
     RCLCPP_INFO(
         this->get_logger(),
-        "rb_estimator started: joint_states=%s imu=%s out=%s imu_frame_mode=%s imu_zero_on_start=%s",
+        "rb_estimator started: joint_states=%s imu=%s out=%s imu_frame_mode=%s",
         input_joint_states_topic_.c_str(), input_imu_topic_.c_str(),
-        output_estimated_state_topic_.c_str(), imu_frame_mode_.c_str(),
-        imu_zero_on_start_ ? "on" : "off");
+        output_estimated_state_topic_.c_str(), imu_frame_mode_.c_str());
   }
 
 private:
@@ -152,15 +149,7 @@ private:
       return;
     }
 
-    const auto update = tilt_observer_.update_from_imu(*msg);
-    if (update.bias_captured_now)
-    {
-      RCLCPP_INFO(
-          this->get_logger(),
-          "imu bias captured: raw_roll=%.3f raw_pitch=%.3f bias_roll=%.3f bias_pitch=%.3f",
-          update.raw_roll_rad, update.raw_pitch_rad, update.bias_roll_rad, update.bias_pitch_rad);
-    }
-
+    tilt_observer_.update_from_imu(*msg);
     publish_estimated_state(msg->header.stamp);
   }
 
@@ -178,8 +167,6 @@ private:
     msg.joint_velocities = latest_joint_velocities_;
     msg.raw_roll_rad = tilt_observer_.raw_roll_rad();
     msg.raw_pitch_rad = tilt_observer_.raw_pitch_rad();
-    msg.bias_roll_rad = tilt_observer_.bias_roll_rad();
-    msg.bias_pitch_rad = tilt_observer_.bias_pitch_rad();
     msg.tilt_roll_rad = tilt_observer_.tilt_roll_rad();
     msg.tilt_pitch_rad = tilt_observer_.tilt_pitch_rad();
     msg.roll_rate_rad_s = tilt_observer_.roll_rate_rad_s();
@@ -206,13 +193,6 @@ private:
         result.reason = "runtime update not supported for topic parameters (restart required)";
         return result;
       }
-      if (name == "imu_zero_on_start")
-      {
-        imu_zero_on_start_ = param.as_bool();
-        tilt_observer_.set_zero_on_start(imu_zero_on_start_);
-        tilt_observer_.reset_bias();
-        continue;
-      }
       if (name == "imu_frame_mode" || name == "tilt_axis_mode")
       {
         const std::string requested = param.as_string();
@@ -237,15 +217,14 @@ private:
 
     RCLCPP_INFO(
         this->get_logger(),
-        "runtime estimator parameters updated: imu_frame_mode=%s imu_zero_on_start=%s",
-        imu_frame_mode_.c_str(), imu_zero_on_start_ ? "on" : "off");
+        "runtime estimator parameters updated: imu_frame_mode=%s",
+        imu_frame_mode_.c_str());
     return result;
   }
 
   std::string input_joint_states_topic_{"/rb/joint_states"};
   std::string input_imu_topic_{"/rb/imu"};
   std::string output_estimated_state_topic_{"/rb/estimated_state"};
-  bool imu_zero_on_start_{false};
   std::string imu_frame_mode_{"identity"};
 
   std::vector<std::string> joint_names_;

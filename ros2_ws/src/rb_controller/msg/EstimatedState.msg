@@ -4,8 +4,6 @@ float64[] joint_positions
 float64[] joint_velocities
 float64 raw_roll_rad
 float64 raw_pitch_rad
-float64 bias_roll_rad
-float64 bias_pitch_rad
 float64 tilt_roll_rad
 float64 tilt_pitch_rad
 float64 roll_rate_rad_s

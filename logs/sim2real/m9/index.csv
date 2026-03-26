@@ -10,3 +10,4 @@ run_id,force_x,force_y,force_z,duration_sec,off_survived,on_survived,off_fall_el
 20260318-120630,115.0,0.0,0.0,0.1,False,False,6.055,5.615,0.016,0.038,0.098,0.115,fail
 20260318-121013,115.0,0.0,0.0,0.1,True,True,,,0.011,0.033,0.095,0.086,partial
 20260318-121521,114.0,0.0,0.0,0.1,False,True,4.98,,0.007,0.028,0.108,0.089,pass
+test_no_bias_20260326_093821,115.0,0.0,0.0,0.1,True,True,,,0.031,0.036,0.089,0.087,partial

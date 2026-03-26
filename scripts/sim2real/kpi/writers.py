@@ -40,6 +40,12 @@ def format_fall_or_no_fall(survived: bool | None, fall_elapsed_sec: float | None
     return "UNKNOWN"
 
 
+def format_optional_float(value: float | None, precision: int = 2) -> str:
+    if value is None:
+        return "none"
+    return f"{value:.{precision}f}"
+
+
 def write_summary_md(path: Path, off: dict[str, Any], on: dict[str, Any], comparison: dict[str, Any]) -> None:
     force = comparison["disturb_configured_force_xyz"]
     duration = comparison["disturb_duration_sec"]
@@ -81,7 +87,7 @@ def write_summary_md(path: Path, off: dict[str, Any], on: dict[str, Any], compar
         "## Config",
         "| field | value |",
         "|---|---|",
-        f"| tilt_qref_bias_abs_max | {on['tilt_qref_bias_abs_max']:.2f} |",
+        f"| tilt_qref_bias_abs_max | {format_optional_float(on.get('tilt_qref_bias_abs_max'), 2)} |",
         f"| hip_pitch_joint_trim | {hip_trim:+.3f} |" if hip_trim is not None else "| hip_pitch_joint_trim | none |",
         f"| ankle_pitch_joint_trim | {ankle_trim:+.3f} |" if ankle_trim is not None else "| ankle_pitch_joint_trim | none |",
     ]

@@ -17,8 +17,6 @@ struct EstimatedStateCache
   bool received{false};
   double imu_raw_roll_rad{quiet_nan()};
   double imu_raw_pitch_rad{quiet_nan()};
-  double imu_bias_roll_rad{quiet_nan()};
-  double imu_bias_pitch_rad{quiet_nan()};
   double tilt_roll_rad{quiet_nan()};
   double tilt_pitch_rad{quiet_nan()};
   double roll_rate_rad_s{quiet_nan()};

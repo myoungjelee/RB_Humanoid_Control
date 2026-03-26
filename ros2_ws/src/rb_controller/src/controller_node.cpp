@@ -115,7 +115,6 @@ public:
     limit_avoid_upper_param_ =
         this->declare_parameter<std::vector<double>>("limit_avoid_upper", std::vector<double>{});
     imu_topic_ = this->declare_parameter<std::string>("input_imu_topic", "/rb/imu");
-    imu_zero_on_start_ = this->declare_parameter<bool>("imu_zero_on_start", false);
     enable_tilt_feedback_ = this->declare_parameter<bool>("enable_tilt_feedback", true);
     tilt_kp_roll_ = this->declare_parameter<double>("tilt_kp_roll", 10.0);
     tilt_kd_roll_ = this->declare_parameter<double>("tilt_kd_roll", 2.0);
@@ -340,8 +339,8 @@ public:
         stand_kd_scale_hip_, stand_kd_scale_knee_, stand_kd_scale_ankle_, stand_kd_scale_torso_, stand_kd_scale_other_);
     RCLCPP_INFO(
         this->get_logger(),
-        "tilt_feedback=%s mode=%s estimator_frame_hint=%s estimator_zero_hint=%s kp_roll=%.3f kd_roll=%.3f kp_pitch=%.3f kd_pitch=%.3f deadband=%.4f max_effort=%.3f qref_bias_max=%.3f sign(r/p)=%.1f/%.1f weights roll(h/a/t)=%.2f/%.2f/%.2f pitch(h/a/k/t)=%.2f/%.2f/%.2f/%.2f",
-        enable_tilt_feedback_ ? "on" : "off", tilt_apply_mode_.c_str(), imu_frame_mode_.c_str(), imu_zero_on_start_ ? "on" : "off",
+        "tilt_feedback=%s mode=%s estimator_frame_hint=%s kp_roll=%.3f kd_roll=%.3f kp_pitch=%.3f kd_pitch=%.3f deadband=%.4f max_effort=%.3f qref_bias_max=%.3f sign(r/p)=%.1f/%.1f weights roll(h/a/t)=%.2f/%.2f/%.2f pitch(h/a/k/t)=%.2f/%.2f/%.2f/%.2f",
+        enable_tilt_feedback_ ? "on" : "off", tilt_apply_mode_.c_str(), imu_frame_mode_.c_str(),
         tilt_kp_roll_, tilt_kd_roll_, tilt_kp_pitch_, tilt_kd_pitch_,
         tilt_deadband_rad_, tilt_effort_abs_max_, tilt_qref_bias_abs_max_, tilt_roll_sign_, tilt_pitch_sign_,
         tilt_weight_roll_hip_, tilt_weight_roll_ankle_, tilt_weight_roll_torso_,
@@ -391,8 +390,6 @@ private:
 
     estimated_state_.imu_raw_roll_rad = msg->raw_roll_rad;
     estimated_state_.imu_raw_pitch_rad = msg->raw_pitch_rad;
-    estimated_state_.imu_bias_roll_rad = msg->bias_roll_rad;
-    estimated_state_.imu_bias_pitch_rad = msg->bias_pitch_rad;
     estimated_state_.tilt_roll_rad = msg->tilt_roll_rad;
     estimated_state_.tilt_pitch_rad = msg->tilt_pitch_rad;
     estimated_state_.roll_rate_rad_s = msg->roll_rate_rad_s;
@@ -556,8 +553,6 @@ private:
     snapshot.samples = runtime_state_.dt_samples_sec.size();
     snapshot.imu_raw_roll_rad = estimated_state_.imu_raw_roll_rad;
     snapshot.imu_raw_pitch_rad = estimated_state_.imu_raw_pitch_rad;
-    snapshot.imu_bias_roll_rad = estimated_state_.imu_bias_roll_rad;
-    snapshot.imu_bias_pitch_rad = estimated_state_.imu_bias_pitch_rad;
     snapshot.tilt_roll_rad = estimated_state_.tilt_roll_rad;
     snapshot.tilt_pitch_rad = estimated_state_.tilt_pitch_rad;
     snapshot.stand_scale = last_stand_output_scale_;
@@ -621,7 +616,7 @@ private:
         result.reason = "runtime update not supported for control_rate_hz/topic parameters (restart required)";
         return result;
       }
-      if (name == "input_imu_topic" || name == "imu_zero_on_start" ||
+      if (name == "input_imu_topic" ||
           name == "imu_frame_mode" || name == "tilt_axis_mode")
       {
         result.successful = false;
@@ -1232,7 +1227,7 @@ private:
 
     RCLCPP_INFO(
         this->get_logger(),
-        "runtime parameters updated: signal_mode=%s stand_kp=%.3f stand_kd=%.3f stand_limit=%.3f hold=%s q_ref_len=%zu ctrl_joint_count=%zu stand_scales kp(h/k/a/t/o)=%.2f/%.2f/%.2f/%.2f/%.2f kd=%.2f/%.2f/%.2f/%.2f/%.2f tilt_fb=%s mode=%s imu_frame_mode=%s imu_zero=%s kp(r/p)=%.3f/%.3f kd(r/p)=%.3f/%.3f deadband=%.4f max_effort=%.3f qref_bias_max=%.3f sign(r/p)=%.1f/%.1f w_roll(h/a/t)=%.2f/%.2f/%.2f w_pitch(h/a/k/t)=%.2f/%.2f/%.2f/%.2f",
+        "runtime parameters updated: signal_mode=%s stand_kp=%.3f stand_kd=%.3f stand_limit=%.3f hold=%s q_ref_len=%zu ctrl_joint_count=%zu stand_scales kp(h/k/a/t/o)=%.2f/%.2f/%.2f/%.2f/%.2f kd=%.2f/%.2f/%.2f/%.2f/%.2f tilt_fb=%s mode=%s imu_frame_mode=%s kp(r/p)=%.3f/%.3f kd(r/p)=%.3f/%.3f deadband=%.4f max_effort=%.3f qref_bias_max=%.3f sign(r/p)=%.1f/%.1f w_roll(h/a/t)=%.2f/%.2f/%.2f w_pitch(h/a/k/t)=%.2f/%.2f/%.2f/%.2f",
         signal_mode_.c_str(), stand_kp_, stand_kd_, stand_effort_abs_max_,
         stand_hold_current_on_start_ ? "true" : "false",
         stand_q_ref_param_.size(), stand_control_joints_param_.size(),
@@ -1240,7 +1235,6 @@ private:
         stand_kd_scale_hip_, stand_kd_scale_knee_, stand_kd_scale_ankle_, stand_kd_scale_torso_, stand_kd_scale_other_,
         enable_tilt_feedback_ ? "on" : "off",
         tilt_apply_mode_.c_str(), estimated_state_.imu_frame_mode.c_str(),
-        "see rb_estimator",
         tilt_kp_roll_, tilt_kp_pitch_, tilt_kd_roll_, tilt_kd_pitch_,
         tilt_deadband_rad_, tilt_effort_abs_max_, tilt_qref_bias_abs_max_, tilt_roll_sign_, tilt_pitch_sign_,
         tilt_weight_roll_hip_, tilt_weight_roll_ankle_, tilt_weight_roll_torso_,
@@ -2167,7 +2161,6 @@ private:
   bool stand_tilt_cut_active_{false};
   bool limit_avoid_map_ready_{false};
   bool limit_avoid_invalid_warned_{false};
-  bool imu_zero_on_start_{false};
   bool tilt_joint_index_ready_{false};
   bool tilt_joint_index_warned_{false};
 

@@ -73,7 +73,6 @@ rb_controller:
     stand_kd_scale_ankle: 1.5
     stand_kp_scale_torso: 2.0
     stand_kd_scale_torso: 1.5
-    imu_zero_on_start: true
     # IMU zeroing과 fixed q_ref가 정리된 뒤에는 tilt 보정을 다시 켜서
     # pose hold보다 실제 standing time이 늘어나는지 본다.
     stand_tilt_cut_enable: false
@@ -163,4 +162,3 @@ rb_safety:
     tilt_limit_roll_rad: 10.0
     tilt_limit_pitch_rad: 10.0
     imu_topic: /rb/imu
-    imu_zero_on_start: true

@@ -72,7 +72,6 @@ rb_controller:
     stand_kd_scale_ankle: 1.5
     stand_kp_scale_torso: 2.0
     stand_kd_scale_torso: 1.5
-    imu_zero_on_start: true
     stand_tilt_cut_enable: false
     enable_tilt_feedback: true
     tilt_apply_mode: qref_bias
@@ -162,7 +161,6 @@ rb_safety:
     velocity_limit_ankle_rad_s: 12.0
     watchdog_rate_hz: 100.0
     imu_topic: /rb/imu
-    imu_zero_on_start: true
     joint_limits:
       left_hip_pitch_joint:
         lower: -2.349999711181

@@ -109,8 +109,6 @@ struct LoopStatsSnapshot
   std::size_t samples{0U};
   double imu_raw_roll_rad{quiet_nan()};
   double imu_raw_pitch_rad{quiet_nan()};
-  double imu_bias_roll_rad{quiet_nan()};
-  double imu_bias_pitch_rad{quiet_nan()};
   double tilt_roll_rad{quiet_nan()};
   double tilt_pitch_rad{quiet_nan()};
   double stand_scale{1.0};
