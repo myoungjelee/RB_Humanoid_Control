@@ -1,8 +1,11 @@
 #include <algorithm>
+#include <cstdint>
+#include <cstdlib>
 #include <memory>
 #include <string>
 #include <vector>
 
+#include "builtin_interfaces/msg/time.hpp"
 #include "controller_tilt_observer.hpp"
 #include "rb_controller/msg/estimated_state.hpp"
 #include "rcl_interfaces/msg/set_parameters_result.hpp"
@@ -15,17 +18,10 @@ namespace rbci = rb_controller::internal;
 namespace
 {
 
-std::string resolve_imu_frame_mode(const std::string &mode)
+std::int64_t time_to_nanoseconds(const builtin_interfaces::msg::Time &stamp)
 {
-  if (mode == "identity" || mode == "standard")
-  {
-    return "identity";
-  }
-  if (mode == "g1_imu_link" || mode == "swap_rp")
-  {
-    return "g1_imu_link";
-  }
-  return "";
+  return (static_cast<std::int64_t>(stamp.sec) * 1000000000LL) +
+         static_cast<std::int64_t>(stamp.nanosec);
 }
 
 }  // namespace
@@ -42,52 +38,11 @@ public:
         this->declare_parameter<std::string>("input_imu_topic", "/rb/imu");
     output_estimated_state_topic_ =
         this->declare_parameter<std::string>("output_estimated_state_topic", "/rb/estimated_state");
-    imu_frame_mode_ = this->declare_parameter<std::string>("imu_frame_mode", "identity");
-    const auto legacy_tilt_axis_mode =
-        this->declare_parameter<std::string>("tilt_axis_mode", "");
-
-    const std::string resolved_imu_frame_mode = resolve_imu_frame_mode(imu_frame_mode_);
-    if (resolved_imu_frame_mode.empty())
+    input_stale_timeout_sec_ = this->declare_parameter<double>("input_stale_timeout_sec", 0.10);
+    if (input_stale_timeout_sec_ < 0.0)
     {
-      RCLCPP_WARN(
-          this->get_logger(),
-          "unknown imu_frame_mode '%s'. fallback to identity",
-          imu_frame_mode_.c_str());
-      imu_frame_mode_ = "identity";
+      input_stale_timeout_sec_ = 0.0;
     }
-    else
-    {
-      imu_frame_mode_ = resolved_imu_frame_mode;
-    }
-
-    if (!legacy_tilt_axis_mode.empty())
-    {
-      const std::string resolved_legacy_mode = resolve_imu_frame_mode(legacy_tilt_axis_mode);
-      if (resolved_legacy_mode.empty())
-      {
-        RCLCPP_WARN(
-            this->get_logger(),
-            "deprecated tilt_axis_mode '%s' is unknown. ignore and keep imu_frame_mode=%s",
-            legacy_tilt_axis_mode.c_str(), imu_frame_mode_.c_str());
-      }
-      else if (imu_frame_mode_ == "identity")
-      {
-        RCLCPP_WARN(
-            this->get_logger(),
-            "deprecated tilt_axis_mode is set. use imu_frame_mode instead. mapped '%s' -> '%s'",
-            legacy_tilt_axis_mode.c_str(), resolved_legacy_mode.c_str());
-        imu_frame_mode_ = resolved_legacy_mode;
-      }
-      else if (resolved_legacy_mode != imu_frame_mode_)
-      {
-        RCLCPP_WARN(
-            this->get_logger(),
-            "imu_frame_mode=%s and deprecated tilt_axis_mode=%s disagree. prefer imu_frame_mode",
-            imu_frame_mode_.c_str(), legacy_tilt_axis_mode.c_str());
-      }
-    }
-
-    tilt_observer_.set_frame_mode(imu_frame_mode_);
 
     estimated_state_pub_ = this->create_publisher<rb_controller::msg::EstimatedState>(
         output_estimated_state_topic_, 20);
@@ -103,9 +58,9 @@ public:
 
     RCLCPP_INFO(
         this->get_logger(),
-        "rb_estimator started: joint_states=%s imu=%s out=%s imu_frame_mode=%s",
+        "rb_estimator started: joint_states=%s imu=%s out=%s g1_frame_comp=on stale_timeout=%.3fs",
         input_joint_states_topic_.c_str(), input_imu_topic_.c_str(),
-        output_estimated_state_topic_.c_str(), imu_frame_mode_.c_str());
+        output_estimated_state_topic_.c_str(), input_stale_timeout_sec_);
   }
 
 private:
@@ -139,6 +94,7 @@ private:
     }
 
     joint_state_received_ = true;
+    latest_joint_state_stamp_ = msg->header.stamp;
     publish_estimated_state(msg->header.stamp);
   }
 
@@ -149,19 +105,25 @@ private:
       return;
     }
 
+    imu_received_ = true;
+    latest_imu_stamp_ = msg->header.stamp;
     tilt_observer_.update_from_imu(*msg);
     publish_estimated_state(msg->header.stamp);
   }
 
   void publish_estimated_state(const builtin_interfaces::msg::Time &stamp)
   {
-    if (!joint_state_received_ || !tilt_observer_.received())
+    if (!joint_state_received_ || !imu_received_ || !tilt_observer_.received())
     {
       return;
     }
 
     rb_controller::msg::EstimatedState msg;
     msg.header.stamp = stamp;
+    msg.joint_state_stamp = latest_joint_state_stamp_;
+    msg.imu_stamp = latest_imu_stamp_;
+    msg.joint_state_valid = is_source_valid(stamp, latest_joint_state_stamp_);
+    msg.imu_valid = is_source_valid(stamp, latest_imu_stamp_);
     msg.joint_names = joint_names_;
     msg.joint_positions = latest_joint_positions_;
     msg.joint_velocities = latest_joint_velocities_;
@@ -171,7 +133,6 @@ private:
     msg.tilt_pitch_rad = tilt_observer_.tilt_pitch_rad();
     msg.roll_rate_rad_s = tilt_observer_.roll_rate_rad_s();
     msg.pitch_rate_rad_s = tilt_observer_.pitch_rate_rad_s();
-    msg.imu_frame_mode = imu_frame_mode_;
     estimated_state_pub_->publish(msg);
   }
 
@@ -193,44 +154,53 @@ private:
         result.reason = "runtime update not supported for topic parameters (restart required)";
         return result;
       }
-      if (name == "imu_frame_mode" || name == "tilt_axis_mode")
+      if (name == "input_stale_timeout_sec")
       {
-        const std::string requested = param.as_string();
-        const std::string resolved = resolve_imu_frame_mode(requested);
-        if (resolved.empty())
+        const double value = param.as_double();
+        if (value < 0.0)
         {
           result.successful = false;
-          result.reason = "imu_frame_mode must be 'identity' or 'g1_imu_link' (legacy: standard/swap_rp)";
+          result.reason = "input_stale_timeout_sec must be >= 0";
           return result;
         }
-        if (name == "tilt_axis_mode")
-        {
-          RCLCPP_WARN(
-              this->get_logger(),
-              "runtime parameter tilt_axis_mode is deprecated. use imu_frame_mode instead.");
-        }
-        imu_frame_mode_ = resolved;
-        tilt_observer_.set_frame_mode(imu_frame_mode_);
+        input_stale_timeout_sec_ = value;
         continue;
       }
     }
 
     RCLCPP_INFO(
         this->get_logger(),
-        "runtime estimator parameters updated: imu_frame_mode=%s",
-        imu_frame_mode_.c_str());
+        "runtime estimator parameters updated: g1_frame_comp=on stale_timeout=%.3fs",
+        input_stale_timeout_sec_);
     return result;
+  }
+
+  bool is_source_valid(
+      const builtin_interfaces::msg::Time &reference_stamp,
+      const builtin_interfaces::msg::Time &source_stamp) const
+  {
+    if (input_stale_timeout_sec_ <= 0.0)
+    {
+      return true;
+    }
+    const std::int64_t delta_ns =
+        std::llabs(time_to_nanoseconds(reference_stamp) - time_to_nanoseconds(source_stamp));
+    const double delta_sec = static_cast<double>(delta_ns) * 1e-9;
+    return delta_sec <= input_stale_timeout_sec_;
   }
 
   std::string input_joint_states_topic_{"/rb/joint_states"};
   std::string input_imu_topic_{"/rb/imu"};
   std::string output_estimated_state_topic_{"/rb/estimated_state"};
-  std::string imu_frame_mode_{"identity"};
+  double input_stale_timeout_sec_{0.10};
 
   std::vector<std::string> joint_names_;
   std::vector<double> latest_joint_positions_;
   std::vector<double> latest_joint_velocities_;
   bool joint_state_received_{false};
+  bool imu_received_{false};
+  builtin_interfaces::msg::Time latest_joint_state_stamp_{};
+  builtin_interfaces::msg::Time latest_imu_stamp_{};
 
   rbci::TiltObserver tilt_observer_{};
 

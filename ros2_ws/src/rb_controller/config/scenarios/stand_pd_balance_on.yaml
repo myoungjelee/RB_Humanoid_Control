@@ -75,7 +75,6 @@ rb_controller:
     stand_tilt_cut_enable: false
     enable_tilt_feedback: true
     tilt_apply_mode: qref_bias
-    imu_frame_mode: g1_imu_link
     tilt_qref_bias_abs_max: 0.08
     tilt_kp_roll: 4.0
     tilt_kd_roll: 0.8

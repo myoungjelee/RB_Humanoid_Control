@@ -15,13 +15,14 @@ struct EstimatedStateCache
   std::vector<double> joint_positions;
   std::vector<double> joint_velocities;
   bool received{false};
+  bool joint_state_valid{false};
+  bool imu_valid{false};
   double imu_raw_roll_rad{quiet_nan()};
   double imu_raw_pitch_rad{quiet_nan()};
   double tilt_roll_rad{quiet_nan()};
   double tilt_pitch_rad{quiet_nan()};
   double roll_rate_rad_s{quiet_nan()};
   double pitch_rate_rad_s{quiet_nan()};
-  std::string imu_frame_mode{"identity"};
 };
 
 struct ControllerRuntimeState

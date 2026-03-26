@@ -80,7 +80,6 @@ rb_controller:
     # 직접 effort를 더하는 대신, nominal q_ref를 기울기 기준으로 조금씩 수정한다.
     tilt_apply_mode: qref_bias
     # G1 imu_link raw 축을 controller pitch/roll 해석과 맞추는 observer-side 보정.
-    imu_frame_mode: g1_imu_link
     tilt_qref_bias_abs_max: 0.15
     tilt_kp_roll: 10.0
     tilt_kd_roll: 2.0

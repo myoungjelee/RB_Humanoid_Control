@@ -5,29 +5,6 @@
 namespace rb_controller::internal
 {
 
-namespace
-{
-
-std::string canonicalize_frame_mode(const std::string &mode)
-{
-  if (mode == "identity" || mode == "standard")
-  {
-    return "identity";
-  }
-  if (mode == "g1_imu_link" || mode == "swap_rp")
-  {
-    return "g1_imu_link";
-  }
-  return "identity";
-}
-
-}  // namespace
-
-void TiltObserver::set_frame_mode(const std::string &mode)
-{
-  frame_mode_ = canonicalize_frame_mode(mode);
-}
-
 void TiltObserver::update_from_imu(const sensor_msgs::msg::Imu &msg)
 {
   const double x = msg.orientation.x;
@@ -49,20 +26,11 @@ void TiltObserver::update_from_imu(const sensor_msgs::msg::Imu &msg)
   const double corrected_roll = normalize_angle_rad(roll);
   const double corrected_pitch = pitch;
 
-  if (frame_mode_ == "g1_imu_link")
-  {
-    tilt_roll_rad_ = normalize_angle_rad(corrected_pitch);
-    tilt_pitch_rad_ = corrected_roll;
-    roll_rate_rad_s_ = msg.angular_velocity.y;
-    pitch_rate_rad_s_ = msg.angular_velocity.x;
-  }
-  else
-  {
-    tilt_roll_rad_ = corrected_roll;
-    tilt_pitch_rad_ = corrected_pitch;
-    roll_rate_rad_s_ = msg.angular_velocity.x;
-    pitch_rate_rad_s_ = msg.angular_velocity.y;
-  }
+  // G1 imu_link 축을 control-frame roll/pitch 해석에 맞춘 고정 보정.
+  tilt_roll_rad_ = normalize_angle_rad(corrected_pitch);
+  tilt_pitch_rad_ = corrected_roll;
+  roll_rate_rad_s_ = msg.angular_velocity.y;
+  pitch_rate_rad_s_ = msg.angular_velocity.x;
 
   received_ = true;
 }

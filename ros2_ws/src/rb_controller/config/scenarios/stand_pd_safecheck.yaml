@@ -76,7 +76,6 @@ rb_controller:
     enable_tilt_feedback: true
     tilt_apply_mode: qref_bias
     # G1 imu_link raw 축을 controller pitch/roll 해석과 맞추는 observer-side 보정.
-    imu_frame_mode: g1_imu_link
     tilt_qref_bias_abs_max: 0.15
     tilt_kp_roll: 10.0
     tilt_kd_roll: 2.0

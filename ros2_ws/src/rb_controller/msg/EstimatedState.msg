@@ -1,4 +1,8 @@
 std_msgs/Header header
+builtin_interfaces/Time joint_state_stamp
+builtin_interfaces/Time imu_stamp
+bool joint_state_valid
+bool imu_valid
 string[] joint_names
 float64[] joint_positions
 float64[] joint_velocities
@@ -8,4 +12,3 @@ float64 tilt_roll_rad
 float64 tilt_pitch_rad
 float64 roll_rate_rad_s
 float64 pitch_rate_rad_s
-string imu_frame_mode

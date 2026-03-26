@@ -250,6 +250,7 @@
 - `imu_zero_on_start`와 startup bias 캡처/차감 경로를 제거했다. 현재 standing baseline은 `imu_frame_mode=g1_imu_link` frame compensation만 사용하고, startup zeroing에는 더 이상 의존하지 않는다.
 - `rb_controller/msg/EstimatedState.msg`에서 `bias_roll_rad`, `bias_pitch_rad`를 제거했다. estimator/controller/debug logger도 같은 방향으로 정리해 `/rb/estimated_state` 계약을 더 단순하게 맞췄다.
 - `controller_tilt_observer.*`, `estimator_node.cpp`, `controller_node.cpp`, `controller.launch.py`, standing 시나리오 YAML에서 bias 관련 파라미터/로그/launch fallback을 제거했다. 즉 현재 구조는 `joint + raw IMU 해석 + frame remap -> tilt/rate`만 남긴 상태다.
+- 추가로 `imu_frame_mode`, `tilt_axis_mode`, legacy alias 인터페이스도 제거했다. 현재 IMU frame correction은 estimator 내부의 G1 고정 보정으로만 동작하고, `EstimatedState.msg`와 standing 시나리오 YAML에서도 관련 옵션을 더 이상 노출하지 않는다.
 - `colcon build --packages-select rb_controller` 재빌드 통과. 메시지 타입 변경 후에도 estimator/controller/safety 경로가 다시 맞물리는 것까지 확인했다.
 - no-bias sanity 확인도 했다. `logs/sim2real/m7/test_no_bias_20260326_093821/m7/` 기준으로 `CONTROL_ACTIVE` 시점 `tilt_r/p`가 0 근처로 들어왔고, safety-on 60초 관측창에서 `NO_FALL_EVENT`, `NO_SAFETY_REASON`를 다시 확인했다.
 - M8/M9 회귀도 다시 확인했다. `logs/sim2real/m8/test_no_bias_20260326_093821/`, `logs/sim2real/m9/test_no_bias_20260326_093821/summary.md` 기준 현재 representative run은 `115N x 0.10s` disturbance에서 `balance_off/on` 모두 no-fall이고, M9 summary/KPI 생성까지 정상 동작한다.

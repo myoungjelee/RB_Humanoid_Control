@@ -45,10 +45,6 @@ def _launch_setup(context, *args, **kwargs):
             "output_estimated_state_topic": controller_params_from_file.get(
                 "output_estimated_state_topic", "/rb/estimated_state"
             ),
-            "imu_frame_mode": controller_params_from_file.get(
-                "imu_frame_mode",
-                controller_params_from_file.get("tilt_axis_mode", "identity"),
-            ),
         }
 
     estimator_node = Node(

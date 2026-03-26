@@ -7,6 +7,7 @@ endif()
 
 # 의존 패키지 찾기
 find_package(ament_cmake REQUIRED)
+find_package(builtin_interfaces REQUIRED)
 find_package(rosidl_default_generators REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(sensor_msgs REQUIRED)
@@ -14,7 +15,7 @@ find_package(std_msgs REQUIRED)
 
 rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/EstimatedState.msg"
-  DEPENDENCIES std_msgs
+  DEPENDENCIES std_msgs builtin_interfaces
 )
 
 add_executable(rb_controller_node
@@ -37,14 +38,17 @@ target_compile_features(rb_controller_node PUBLIC cxx_std_17)
 target_compile_features(rb_estimator_node PUBLIC cxx_std_17)
 target_compile_features(rb_safety_node PUBLIC cxx_std_17)
 ament_target_dependencies(rb_controller_node
+  builtin_interfaces
   rclcpp
   sensor_msgs
 )
 ament_target_dependencies(rb_estimator_node
+  builtin_interfaces
   rclcpp
   sensor_msgs
 )
 ament_target_dependencies(rb_safety_node
+  builtin_interfaces
   rclcpp
   sensor_msgs
 )

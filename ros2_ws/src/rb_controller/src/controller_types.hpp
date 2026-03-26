@@ -93,7 +93,6 @@ struct ControlActiveSnapshot
   double imu_raw_pitch_rad{quiet_nan()};
   double tilt_roll_rad{quiet_nan()};
   double tilt_pitch_rad{quiet_nan()};
-  std::string imu_frame_mode{"identity"};
 };
 
 /**

@@ -23,24 +23,6 @@
 
 namespace rbci = rb_controller::internal;
 
-namespace
-{
-
-std::string resolve_imu_frame_mode(const std::string &mode)
-{
-  if (mode == "identity" || mode == "standard")
-  {
-    return "identity";
-  }
-  if (mode == "g1_imu_link" || mode == "swap_rp")
-  {
-    return "g1_imu_link";
-  }
-  return "";
-}
-
-}  // namespace
-
 // 200Hz 제어 루프 타이밍을 측정하고, 테스트/스탠드 명령(/rb/command_raw)을 퍼블리시하는 노드
 class RbControllerNode : public rclcpp::Node
 {
@@ -114,7 +96,6 @@ public:
         this->declare_parameter<std::vector<double>>("limit_avoid_lower", std::vector<double>{});
     limit_avoid_upper_param_ =
         this->declare_parameter<std::vector<double>>("limit_avoid_upper", std::vector<double>{});
-    imu_topic_ = this->declare_parameter<std::string>("input_imu_topic", "/rb/imu");
     enable_tilt_feedback_ = this->declare_parameter<bool>("enable_tilt_feedback", true);
     tilt_kp_roll_ = this->declare_parameter<double>("tilt_kp_roll", 10.0);
     tilt_kd_roll_ = this->declare_parameter<double>("tilt_kd_roll", 2.0);
@@ -122,9 +103,6 @@ public:
     tilt_kd_pitch_ = this->declare_parameter<double>("tilt_kd_pitch", 2.5);
     tilt_deadband_rad_ = this->declare_parameter<double>("tilt_deadband_rad", 0.03);
     tilt_apply_mode_ = this->declare_parameter<std::string>("tilt_apply_mode", "effort");
-    imu_frame_mode_ = this->declare_parameter<std::string>("imu_frame_mode", "identity");
-    const auto legacy_tilt_axis_mode =
-        this->declare_parameter<std::string>("tilt_axis_mode", "");
     tilt_effort_abs_max_ = this->declare_parameter<double>("tilt_effort_abs_max", 1.8);
     tilt_qref_bias_abs_max_ = this->declare_parameter<double>("tilt_qref_bias_abs_max", 0.20);
     tilt_roll_sign_ = this->declare_parameter<double>("tilt_roll_sign", 1.0);
@@ -246,45 +224,6 @@ public:
           tilt_apply_mode_.c_str());
       tilt_apply_mode_ = "effort";
     }
-    const std::string resolved_imu_frame_mode = resolve_imu_frame_mode(imu_frame_mode_);
-    if (resolved_imu_frame_mode.empty())
-    {
-      RCLCPP_WARN(
-          this->get_logger(),
-          "unknown imu_frame_mode '%s'. fallback to identity",
-          imu_frame_mode_.c_str());
-      imu_frame_mode_ = "identity";
-    }
-    else
-    {
-      imu_frame_mode_ = resolved_imu_frame_mode;
-    }
-    if (!legacy_tilt_axis_mode.empty())
-    {
-      const std::string resolved_legacy_mode = resolve_imu_frame_mode(legacy_tilt_axis_mode);
-      if (resolved_legacy_mode.empty())
-      {
-        RCLCPP_WARN(
-            this->get_logger(),
-            "deprecated tilt_axis_mode '%s' is unknown. ignore and keep imu_frame_mode=%s",
-            legacy_tilt_axis_mode.c_str(), imu_frame_mode_.c_str());
-      }
-      else if (imu_frame_mode_ == "identity")
-      {
-        RCLCPP_WARN(
-            this->get_logger(),
-            "deprecated tilt_axis_mode is set. use imu_frame_mode instead. mapped '%s' -> '%s'",
-            legacy_tilt_axis_mode.c_str(), resolved_legacy_mode.c_str());
-        imu_frame_mode_ = resolved_legacy_mode;
-      }
-      else if (resolved_legacy_mode != imu_frame_mode_)
-      {
-        RCLCPP_WARN(
-            this->get_logger(),
-            "imu_frame_mode=%s and deprecated tilt_axis_mode=%s disagree. prefer imu_frame_mode",
-            imu_frame_mode_.c_str(), legacy_tilt_axis_mode.c_str());
-      }
-    }
     tilt_weight_roll_hip_ = std::max(0.0, tilt_weight_roll_hip_);
     tilt_weight_roll_ankle_ = std::max(0.0, tilt_weight_roll_ankle_);
     tilt_weight_roll_torso_ = std::max(0.0, tilt_weight_roll_torso_);
@@ -339,8 +278,8 @@ public:
         stand_kd_scale_hip_, stand_kd_scale_knee_, stand_kd_scale_ankle_, stand_kd_scale_torso_, stand_kd_scale_other_);
     RCLCPP_INFO(
         this->get_logger(),
-        "tilt_feedback=%s mode=%s estimator_frame_hint=%s kp_roll=%.3f kd_roll=%.3f kp_pitch=%.3f kd_pitch=%.3f deadband=%.4f max_effort=%.3f qref_bias_max=%.3f sign(r/p)=%.1f/%.1f weights roll(h/a/t)=%.2f/%.2f/%.2f pitch(h/a/k/t)=%.2f/%.2f/%.2f/%.2f",
-        enable_tilt_feedback_ ? "on" : "off", tilt_apply_mode_.c_str(), imu_frame_mode_.c_str(),
+        "tilt_feedback=%s mode=%s g1_frame_comp=on kp_roll=%.3f kd_roll=%.3f kp_pitch=%.3f kd_pitch=%.3f deadband=%.4f max_effort=%.3f qref_bias_max=%.3f sign(r/p)=%.1f/%.1f weights roll(h/a/t)=%.2f/%.2f/%.2f pitch(h/a/k/t)=%.2f/%.2f/%.2f/%.2f",
+        enable_tilt_feedback_ ? "on" : "off", tilt_apply_mode_.c_str(),
         tilt_kp_roll_, tilt_kd_roll_, tilt_kp_pitch_, tilt_kd_pitch_,
         tilt_deadband_rad_, tilt_effort_abs_max_, tilt_qref_bias_abs_max_, tilt_roll_sign_, tilt_pitch_sign_,
         tilt_weight_roll_hip_, tilt_weight_roll_ankle_, tilt_weight_roll_torso_,
@@ -388,13 +327,14 @@ private:
       estimated_state_.joint_velocities[i] = msg->joint_velocities[i];
     }
 
+    estimated_state_.joint_state_valid = msg->joint_state_valid;
+    estimated_state_.imu_valid = msg->imu_valid;
     estimated_state_.imu_raw_roll_rad = msg->raw_roll_rad;
     estimated_state_.imu_raw_pitch_rad = msg->raw_pitch_rad;
     estimated_state_.tilt_roll_rad = msg->tilt_roll_rad;
     estimated_state_.tilt_pitch_rad = msg->tilt_pitch_rad;
     estimated_state_.roll_rate_rad_s = msg->roll_rate_rad_s;
     estimated_state_.pitch_rate_rad_s = msg->pitch_rate_rad_s;
-    estimated_state_.imu_frame_mode = msg->imu_frame_mode.empty() ? imu_frame_mode_ : msg->imu_frame_mode;
     estimated_state_.received = true;
   }
 
@@ -436,7 +376,10 @@ private:
     reset_pitch_chain_debug_snapshot();
     reset_ankle_effort_debug_snapshot();
 
-    if (!runtime_state_.control_active_logged && estimated_state_.received)
+    if (!runtime_state_.control_active_logged &&
+        estimated_state_.received &&
+        estimated_state_.joint_state_valid &&
+        estimated_state_.imu_valid)
     {
       runtime_state_.control_active_logged = true;
       rbci::ControlActiveSnapshot snapshot;
@@ -445,7 +388,6 @@ private:
       snapshot.imu_raw_pitch_rad = estimated_state_.imu_raw_pitch_rad;
       snapshot.tilt_roll_rad = estimated_state_.tilt_roll_rad;
       snapshot.tilt_pitch_rad = estimated_state_.tilt_pitch_rad;
-      snapshot.imu_frame_mode = estimated_state_.imu_frame_mode;
       RCLCPP_INFO(this->get_logger(), "%s", rbci::format_control_active_sync(snapshot).c_str());
     }
 
@@ -614,13 +556,6 @@ private:
       {
         result.successful = false;
         result.reason = "runtime update not supported for control_rate_hz/topic parameters (restart required)";
-        return result;
-      }
-      if (name == "input_imu_topic" ||
-          name == "imu_frame_mode" || name == "tilt_axis_mode")
-      {
-        result.successful = false;
-        result.reason = "IMU estimation parameters moved to rb_estimator (restart required)";
         return result;
       }
       if (name == "signal_mode")
@@ -1227,14 +1162,13 @@ private:
 
     RCLCPP_INFO(
         this->get_logger(),
-        "runtime parameters updated: signal_mode=%s stand_kp=%.3f stand_kd=%.3f stand_limit=%.3f hold=%s q_ref_len=%zu ctrl_joint_count=%zu stand_scales kp(h/k/a/t/o)=%.2f/%.2f/%.2f/%.2f/%.2f kd=%.2f/%.2f/%.2f/%.2f/%.2f tilt_fb=%s mode=%s imu_frame_mode=%s kp(r/p)=%.3f/%.3f kd(r/p)=%.3f/%.3f deadband=%.4f max_effort=%.3f qref_bias_max=%.3f sign(r/p)=%.1f/%.1f w_roll(h/a/t)=%.2f/%.2f/%.2f w_pitch(h/a/k/t)=%.2f/%.2f/%.2f/%.2f",
+        "runtime parameters updated: signal_mode=%s stand_kp=%.3f stand_kd=%.3f stand_limit=%.3f hold=%s q_ref_len=%zu ctrl_joint_count=%zu stand_scales kp(h/k/a/t/o)=%.2f/%.2f/%.2f/%.2f/%.2f kd=%.2f/%.2f/%.2f/%.2f/%.2f tilt_fb=%s mode=%s g1_frame_comp=on kp(r/p)=%.3f/%.3f kd(r/p)=%.3f/%.3f deadband=%.4f max_effort=%.3f qref_bias_max=%.3f sign(r/p)=%.1f/%.1f w_roll(h/a/t)=%.2f/%.2f/%.2f w_pitch(h/a/k/t)=%.2f/%.2f/%.2f/%.2f",
         signal_mode_.c_str(), stand_kp_, stand_kd_, stand_effort_abs_max_,
         stand_hold_current_on_start_ ? "true" : "false",
         stand_q_ref_param_.size(), stand_control_joints_param_.size(),
         stand_kp_scale_hip_, stand_kp_scale_knee_, stand_kp_scale_ankle_, stand_kp_scale_torso_, stand_kp_scale_other_,
         stand_kd_scale_hip_, stand_kd_scale_knee_, stand_kd_scale_ankle_, stand_kd_scale_torso_, stand_kd_scale_other_,
-        enable_tilt_feedback_ ? "on" : "off",
-        tilt_apply_mode_.c_str(), estimated_state_.imu_frame_mode.c_str(),
+        enable_tilt_feedback_ ? "on" : "off", tilt_apply_mode_.c_str(),
         tilt_kp_roll_, tilt_kp_pitch_, tilt_kd_roll_, tilt_kd_pitch_,
         tilt_deadband_rad_, tilt_effort_abs_max_, tilt_qref_bias_abs_max_, tilt_roll_sign_, tilt_pitch_sign_,
         tilt_weight_roll_hip_, tilt_weight_roll_ankle_, tilt_weight_roll_torso_,
@@ -1323,6 +1257,13 @@ private:
       RCLCPP_WARN_THROTTLE(
           this->get_logger(), *this->get_clock(), 3000,
           "tilt feedback waiting for /rb/estimated_state samples");
+      return false;
+    }
+    if (!estimated_state_.imu_valid)
+    {
+      RCLCPP_WARN_THROTTLE(
+          this->get_logger(), *this->get_clock(), 3000,
+          "tilt feedback waiting for valid IMU state in /rb/estimated_state");
       return false;
     }
     if (!ensure_tilt_joint_index_ready())
@@ -1611,6 +1552,13 @@ private:
           "stand_pd waiting for /rb/estimated_state samples");
       return;
     }
+    if (!estimated_state_.joint_state_valid)
+    {
+      RCLCPP_WARN_THROTTLE(
+          this->get_logger(), *this->get_clock(), 3000,
+          "stand_pd waiting for valid joint state in /rb/estimated_state");
+      return;
+    }
 
     if (!ensure_stand_reference_ready())
     {
@@ -1749,6 +1697,13 @@ private:
       RCLCPP_WARN_THROTTLE(
           this->get_logger(), *this->get_clock(), 3000,
           "stand_tilt_cut enabled but /rb/estimated_state is not ready yet");
+      return 1.0;
+    }
+    if (!estimated_state_.imu_valid)
+    {
+      RCLCPP_WARN_THROTTLE(
+          this->get_logger(), *this->get_clock(), 3000,
+          "stand_tilt_cut enabled but IMU state in /rb/estimated_state is invalid");
       return 1.0;
     }
 
@@ -2119,7 +2074,6 @@ private:
   std::vector<std::string> limit_avoid_joint_names_param_;
   std::vector<double> limit_avoid_lower_param_;
   std::vector<double> limit_avoid_upper_param_;
-  std::string imu_topic_{"/rb/imu"};
   bool enable_tilt_feedback_{true};
   double tilt_kp_roll_{10.0};
   double tilt_kd_roll_{2.0};
@@ -2127,7 +2081,6 @@ private:
   double tilt_kd_pitch_{2.5};
   double tilt_deadband_rad_{0.03};
   std::string tilt_apply_mode_{"effort"};
-  std::string imu_frame_mode_{"identity"};
   double tilt_effort_abs_max_{1.8};
   double tilt_qref_bias_abs_max_{0.20};
   double tilt_roll_sign_{1.0};

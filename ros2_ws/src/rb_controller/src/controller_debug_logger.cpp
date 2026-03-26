@@ -11,13 +11,12 @@ std::string format_control_active_sync(const ControlActiveSnapshot &snapshot)
   std::array<char, 512> buffer{};
   std::snprintf(
       buffer.data(), buffer.size(),
-      "[SYNC] CONTROL_ACTIVE joint_count=%zu imu_raw_r=%.3f imu_raw_p=%.3f tilt_r=%.3f tilt_p=%.3f imu_frame_mode=%s",
+      "[SYNC] CONTROL_ACTIVE joint_count=%zu imu_raw_r=%.3f imu_raw_p=%.3f tilt_r=%.3f tilt_p=%.3f",
       snapshot.joint_count,
       snapshot.imu_raw_roll_rad,
       snapshot.imu_raw_pitch_rad,
       snapshot.tilt_roll_rad,
-      snapshot.tilt_pitch_rad,
-      snapshot.imu_frame_mode.c_str());
+      snapshot.tilt_pitch_rad);
   return std::string(buffer.data());
 }
 

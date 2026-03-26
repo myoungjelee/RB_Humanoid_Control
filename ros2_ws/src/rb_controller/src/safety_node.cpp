@@ -376,6 +376,12 @@ private:
       return;
     }
 
+    latest_estimated_state_valid_ = msg->imu_valid;
+    if (!msg->imu_valid)
+    {
+      return;
+    }
+
     latest_roll_rad_ = msg->tilt_roll_rad;
     latest_pitch_rad_ = msg->tilt_pitch_rad;
     latest_estimated_state_received_ = true;
@@ -671,7 +677,14 @@ private:
     {
       RCLCPP_WARN_THROTTLE(
           this->get_logger(), *this->get_clock(), 5000,
-          "tilt check enabled but /rb/estimated_state has no samples yet");
+          "tilt check enabled but /rb/estimated_state has no valid samples yet");
+      return false;
+    }
+    if (!latest_estimated_state_valid_)
+    {
+      RCLCPP_WARN_THROTTLE(
+          this->get_logger(), *this->get_clock(), 5000,
+          "tilt check waiting for valid IMU state in /rb/estimated_state");
       return false;
     }
 
@@ -995,6 +1008,7 @@ private:
   bool latest_command_received_{false};
   bool latest_joint_state_received_{false};
   bool latest_estimated_state_received_{false};
+  bool latest_estimated_state_valid_{false};
   double latest_roll_rad_{0.0};
   double latest_pitch_rad_{0.0};
   sensor_msgs::msg::JointState latest_raw_command_;
