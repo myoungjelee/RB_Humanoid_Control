@@ -35,6 +35,15 @@
 - M4 완료
   - `CLAMP`, `JOINT_LIMIT`, `TIMEOUT`, `TILT` 개별 재검증 완료
 
+### 최신 리팩 완료 (2026-03-23)
+- ROS control stack을 `Estimator -> Controller -> Safety` 런타임 경계로 재정리했다. `rb_estimator_node`를 분리했고, `/rb/estimated_state`를 도입해 controller와 safety가 같은 추정 상태를 기준으로 동작하도록 맞췄다.
+- safety는 raw IMU direct tilt 해석 대신 estimated state를 사용하도록 정리했다. controller 내부도 `controller_stand_utils.*`, `controller_runtime_state.hpp` 기준으로 helper/runtime cache를 분리해 node 책임을 더 얇게 만들었다.
+- Isaac app은 `main -> phase_registry -> phase_handlers -> phase_runtime` 구조로 phase orchestration을 분리했고, world(`world_factory/runtime/spawn`), bridge(`graph_prim_resolver`, `sensor_graph_builder`, `command_apply_graph_builder`), KPI(`kpi/parsers/model/writers`) 레이어를 나눴다. 구조화 로그는 `telemetry.py`로 모았다.
+- 기존 엔트리 경로는 유지했다. `main.py`, `controller.launch.py`, `ops/run_m8_and_m9.sh`, `extract_m8_kpi.py`는 그대로 쓰되 내부 구현만 facade + 분리 모듈 구조로 정리했다.
+- 검증은 `colcon build --packages-select rb_controller`, Python syntax check, `python main.py --phase m1_sensor --steps 2 --headless`, `ops/run_m8_and_m9.sh` smoke까지 통과했다. smoke 중 드러난 `extract_m8_kpi.py` import 경로 문제와 `kpi/writers.py`의 short-run `None` 포맷 문제도 수정했다.
+- 주의: 아래 구간에 남아 있는 `estimator 분리는 M10에서 진행` 같은 문구는 리팩 이전 메모다. 현재는 경계 분리는 완료됐고, 다음 M10의 초점은 estimator 내부 refinement와 contract 안정화다.
+
+
 ## 4. 최근 조사 결과
 ### IsaacLab asset reference
 - `/home/leemou/IsaacLab/source/isaaclab_assets/isaaclab_assets/robots/unitree.py` 기준 `G1_CFG -> Robots/Unitree/G1/g1.usd` direct spawn 경로 확인

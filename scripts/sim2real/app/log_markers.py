@@ -1,4 +1,4 @@
-"""Shared Isaac-side telemetry/log helpers.
+"""Shared Isaac-side log marker helpers.
 
 Keep structured log markers stable so existing tmux capture and KPI parsing
 continue to work while the logging responsibility is centralized.

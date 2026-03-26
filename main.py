@@ -19,9 +19,8 @@ from scripts.sim2real.app.config import (
     get_phase_config,
     load_sim2real_config,
 )
-from scripts.sim2real.app.phase_registry import SUPPORTED_PHASES, run_phase
-from scripts.sim2real.app.phase_runtime import prepare_phase_runtime
-from scripts.sim2real.app.telemetry import log_config, log_exception, log_result
+from scripts.sim2real.app.log_markers import log_config, log_exception, log_result
+from scripts.sim2real.app.phases import SUPPORTED_PHASES, prepare_phase_runtime, run_phase
 
 
 def _resolve_runtime_device() -> str:
@@ -108,12 +107,17 @@ def run(argv: list[str] | None = None, forced_phase: str | None = None) -> int:
         for key in ("task_id", "status", "executed_steps", "elapsed_sec", "graph_built", "graph_note"):
             log_result(key, result.get(key))
         status = str(result.get("status", "failed"))
-        exit_code = 0 if status in (
-            "completed_target_steps",
-            "stopped_early",
-            "stopped_no_step_limit",
-            "stopped_on_fall_event",
-        ) else 1
+        exit_code = (
+            0
+            if status
+            in (
+                "completed_target_steps",
+                "stopped_early",
+                "stopped_no_step_limit",
+                "stopped_on_fall_event",
+            )
+            else 1
+        )
     except Exception as exc:
         log_exception(exc, traceback.format_exc())
         exit_code = 1
