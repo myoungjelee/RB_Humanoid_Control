@@ -1,7 +1,7 @@
-"""Launch rb_controller + rb_safety with a default safety parameter file.
+"""rb_estimator + rb_controller + rb_safety를 한 번에 띄우는 기본 launch.
 
-This launch file provides one-line startup for controller + safety and loads
-`config/safety.yaml` by default. Operators can still override `params_file`.
+기본값은 `config/safety.yaml`을 읽고, 필요하면 `params_file`로 scenario YAML을 덮어쓴다.
+즉 tmux/스크립트 쪽에서는 이 launch 하나만 호출하면 제어 스택 전체를 재현할 수 있다.
 """
 
 from pathlib import Path
@@ -15,6 +15,7 @@ from launch_ros.substitutions import FindPackageShare
 
 
 def _load_params_for_node(params_file: str, node_name: str) -> dict:
+    """YAML에서 특정 노드의 ros__parameters 블록만 안전하게 읽어온다."""
     try:
         loaded = yaml.safe_load(Path(params_file).read_text()) or {}
     except OSError:
@@ -28,13 +29,14 @@ def _load_params_for_node(params_file: str, node_name: str) -> dict:
 
 
 def _launch_setup(context, *args, **kwargs):
-    """Build nodes after resolving optional controller-only parameter overrides."""
+    """launch 인자를 실제 값으로 풀고 estimator/controller/safety 노드를 구성한다."""
     params_file = LaunchConfiguration("params_file").perform(context)
     estimator_params_from_file = _load_params_for_node(params_file, "rb_estimator")
     controller_params_from_file = _load_params_for_node(params_file, "rb_controller")
 
     estimator_fallback_parameters = {}
     if not estimator_params_from_file:
+        # scenario YAML에 rb_estimator 블록이 없더라도 controller 쪽 토픽 설정은 그대로 따라가게 한다.
         estimator_fallback_parameters = {
             "input_joint_states_topic": controller_params_from_file.get(
                 "input_joint_states_topic", "/rb/joint_states"
@@ -64,6 +66,7 @@ def _launch_setup(context, *args, **kwargs):
         LaunchConfiguration("params_file"),
         {"use_sim_time": LaunchConfiguration("use_sim_time")},
     ]
+    # M8에서는 같은 base YAML을 쓰고 tilt feedback만 ON/OFF override 하므로 launch에서 한 번 더 훅을 둔다.
     controller_override = LaunchConfiguration(
         "enable_tilt_feedback_override"
     ).perform(context)
@@ -96,7 +99,7 @@ def _launch_setup(context, *args, **kwargs):
 
 
 def generate_launch_description() -> LaunchDescription:
-    """Generate launch description for rb_estimator + rb_controller + rb_safety."""
+    """launch 인자 선언과 노드 구성을 묶어 최종 LaunchDescription을 반환한다."""
     # 패키지 설치 경로 기준 기본 파라미터 파일(안전 설정)을 찾는다.
     default_params_file = PathJoinSubstitution(
         [FindPackageShare("rb_controller"), "config", "safety.yaml"]

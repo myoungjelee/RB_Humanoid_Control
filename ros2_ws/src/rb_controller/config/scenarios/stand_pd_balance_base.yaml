@@ -1,5 +1,7 @@
 rb_controller:
   ros__parameters:
+    # M8 balance 비교용 공통 controller baseline.
+    # balance_off/on은 이 파일을 공유하고, enable_tilt_feedback만 override해서 비교한다.
     signal_mode: stand_pd
     log_interval_sec: 0.2
     # M8 공통 baseline: balance_off/on 비교는 enable_tilt_feedback만 다르게 둔다.
@@ -105,6 +107,7 @@ rb_controller:
         right_ankle_roll_joint,
       ]
     stand_pos_error_abs_max: 0.18
+    # 관절군별 gain scale. M8은 외란 대응을 보기 때문에 ankle damping을 sanity보다 조금 더 키운다.
     stand_kp_scale_hip: 1.5
     stand_kd_scale_hip: 1.2
     stand_kp_scale_knee: 1.2
@@ -115,6 +118,7 @@ rb_controller:
     stand_kd_scale_torso: 1.5
     stand_tilt_cut_enable: false
     enable_tilt_feedback: true
+    # tilt feedback 블록. M8에서는 qref_bias 모드로 nominal pose를 살짝 움직여 복원 방향을 만든다.
     tilt_apply_mode: qref_bias
     tilt_qref_bias_abs_max: 0.03
     tilt_kp_roll: 2.0
@@ -130,6 +134,7 @@ rb_controller:
     tilt_weight_pitch_knee: 0.15
     tilt_weight_pitch_torso: 0.05
     limit_avoid_enable: true
+    # limit avoid 블록. 외란으로 limit 근처까지 밀려도 controller가 먼저 안쪽으로 되돌리게 한다.
     limit_avoid_margin_rad: 0.08
     limit_avoid_kp: 10.0
     limit_avoid_kd: 2.0
@@ -184,6 +189,7 @@ rb_controller:
 
 rb_safety:
   ros__parameters:
+    # M8 safety baseline. disturbance 중에도 timeout/tilt/velocity/joint limit 방어를 유지한다.
     input_command_topic: /rb/command_raw
     output_command_topic: /rb/command_safe
     input_joint_states_topic: /rb/joint_states

@@ -1,5 +1,7 @@
 rb_controller:
   ros__parameters:
+    # M5/M7 이전 bring-up sanity baseline.
+    # 외란 없이 기본 stand가 가능한지 먼저 보는 설정이다.
     signal_mode: stand_pd
     log_interval_sec: 0.2
     # M5 진입 전 무외란 기본 stand를 먼저 확보하기 위한 sanity 설정.
@@ -65,6 +67,7 @@ rb_controller:
         right_ankle_roll_joint,
       ]
     stand_pos_error_abs_max: 0.18
+    # 관절군별 gain scale. 하체/몸통 쪽을 더 강하게 잡아 기본 standing을 먼저 확보한다.
     stand_kp_scale_hip: 1.5
     stand_kd_scale_hip: 1.2
     stand_kp_scale_knee: 1.2
@@ -79,7 +82,7 @@ rb_controller:
     enable_tilt_feedback: true
     # 직접 effort를 더하는 대신, nominal q_ref를 기울기 기준으로 조금씩 수정한다.
     tilt_apply_mode: qref_bias
-    # G1 imu_link raw 축을 controller pitch/roll 해석과 맞추는 observer-side 보정.
+    # tilt feedback 블록. estimator가 정리한 tilt/rate를 q_ref bias로 분배한다.
     tilt_qref_bias_abs_max: 0.15
     tilt_kp_roll: 10.0
     tilt_kd_roll: 2.0
@@ -94,6 +97,7 @@ rb_controller:
     tilt_weight_pitch_knee: 0.15
     tilt_weight_pitch_torso: 0.05
     limit_avoid_enable: true
+    # limit avoid 블록. 제어기 단계에서 먼저 limit 바깥 방향 출력을 줄여 safety 개입을 늦춘다.
     limit_avoid_margin_rad: 0.08
     limit_avoid_kp: 10.0
     limit_avoid_kd: 2.0
@@ -148,6 +152,8 @@ rb_controller:
 
 rb_safety:
   ros__parameters:
+    # sanity 단계 safety 설정.
+    # controller baseline을 먼저 보기 위해 safety는 꺼 두고, 나중 M7에서 다시 켠다.
     input_command_topic: /rb/command_raw
     output_command_topic: /rb/command_safe
     input_joint_states_topic: /rb/joint_states

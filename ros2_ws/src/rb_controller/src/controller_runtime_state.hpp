@@ -10,6 +10,7 @@
 namespace rb_controller::internal
 {
 
+// controller가 매 tick마다 다시 계산하지 않도록, estimated_state에서 자주 쓰는 값만 캐시해 둔다.
 struct EstimatedStateCache
 {
   std::vector<double> joint_positions;
@@ -25,6 +26,7 @@ struct EstimatedStateCache
   double pitch_rate_rad_s{quiet_nan()};
 };
 
+// 제어 루프 통계와 debug snapshot을 누적해 loop_stats / sync 로그에 재사용하는 런타임 상태다.
 struct ControllerRuntimeState
 {
   std::vector<double> dt_samples_sec;

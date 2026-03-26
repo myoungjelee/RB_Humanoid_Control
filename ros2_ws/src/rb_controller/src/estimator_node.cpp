@@ -13,11 +13,13 @@
 #include "sensor_msgs/msg/imu.hpp"
 #include "sensor_msgs/msg/joint_state.hpp"
 
+// 내부 helper/observer 타입 이름이 길어서 cpp 내부에서만 짧게 쓴다.
 namespace rbci = rb_controller::internal;
 
 namespace
 {
 
+// ROS Time(sec/nanosec)를 stale 판정에 쓰기 쉬운 정수 ns로 변환한다.
 std::int64_t time_to_nanoseconds(const builtin_interfaces::msg::Time &stamp)
 {
   return (static_cast<std::int64_t>(stamp.sec) * 1000000000LL) +
@@ -32,6 +34,7 @@ public:
   RbEstimatorNode()
       : Node("rb_estimator")
   {
+    // estimator는 raw sensor를 직접 제어에 쓰지 않고, /rb/estimated_state 계약으로 한 번 정리해 넘긴다.
     input_joint_states_topic_ =
         this->declare_parameter<std::string>("input_joint_states_topic", "/rb/joint_states");
     input_imu_topic_ =
@@ -71,6 +74,7 @@ private:
       return;
     }
 
+    // 조인트 이름 순서가 바뀌면 이후 controller/safety가 같은 순서로 읽을 수 있게 캐시를 갱신한다.
     if (joint_names_ != msg->name)
     {
       joint_names_ = msg->name;
@@ -93,6 +97,7 @@ private:
       latest_joint_velocities_[i] = msg->velocity[i];
     }
 
+    // estimator는 joint와 IMU 둘 중 어느 콜백에서든 최신 통합 상태를 다시 publish한다.
     joint_state_received_ = true;
     latest_joint_state_stamp_ = msg->header.stamp;
     publish_estimated_state(msg->header.stamp);
@@ -105,6 +110,7 @@ private:
       return;
     }
 
+    // IMU raw는 observer 내부에서 G1 기준 tilt/rate로 변환한다.
     imu_received_ = true;
     latest_imu_stamp_ = msg->header.stamp;
     tilt_observer_.update_from_imu(*msg);
@@ -113,6 +119,7 @@ private:
 
   void publish_estimated_state(const builtin_interfaces::msg::Time &stamp)
   {
+    // 최소한 joint + imu + observer 출력이 모두 준비되어야 제어용 상태 계약을 publish한다.
     if (!joint_state_received_ || !imu_received_ || !tilt_observer_.received())
     {
       return;
@@ -120,8 +127,10 @@ private:
 
     rb_controller::msg::EstimatedState msg;
     msg.header.stamp = stamp;
+    // fused state에서도 원본 source stamp를 따로 남겨 consumer가 freshness를 직접 판단할 수 있게 한다.
     msg.joint_state_stamp = latest_joint_state_stamp_;
     msg.imu_stamp = latest_imu_stamp_;
+    // stale_timeout을 넘긴 입력은 valid=false로 내려 controller/safety가 그대로 쓰지 않게 한다.
     msg.joint_state_valid = is_source_valid(stamp, latest_joint_state_stamp_);
     msg.imu_valid = is_source_valid(stamp, latest_imu_stamp_);
     msg.joint_names = joint_names_;
@@ -179,6 +188,7 @@ private:
       const builtin_interfaces::msg::Time &reference_stamp,
       const builtin_interfaces::msg::Time &source_stamp) const
   {
+    // timeout이 0 이하이면 stale 판정을 끄고 항상 valid로 본다.
     if (input_stale_timeout_sec_ <= 0.0)
     {
       return true;

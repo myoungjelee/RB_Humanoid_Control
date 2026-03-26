@@ -1246,6 +1246,7 @@ private:
         "unknown signal_mode '%s' (supported: zero|sine_effort|step_effort|stand_pd)", signal_mode_.c_str());
   }
 
+  // estimated_state의 tilt/rate를 제어 입력으로 바꿔, 각 관절 체인에 어떻게 분배할지까지 계산한다.
   bool compute_tilt_feedback_command(rbci::TiltFeedbackCommand &cmd)
   {
     if (!enable_tilt_feedback_)
@@ -1273,6 +1274,7 @@ private:
 
     double roll = estimated_state_.tilt_roll_rad;
     double pitch = estimated_state_.tilt_pitch_rad;
+    // 아주 작은 기울기는 노이즈로 보고 feedback을 넣지 않는다.
     if (std::abs(roll) < tilt_deadband_rad_)
     {
       roll = 0.0;
@@ -1307,6 +1309,7 @@ private:
       }
     }
 
+    // 실제로는 "roll/pitch 보정량 하나"를 계산한 뒤, 관절군별 weight로 분배한다.
     const double roll_w_sum = tilt_weight_roll_hip_ + tilt_weight_roll_ankle_ + tilt_weight_roll_torso_;
     const double pitch_w_sum =
         tilt_weight_pitch_hip_ + tilt_weight_pitch_ankle_ + tilt_weight_pitch_knee_ + tilt_weight_pitch_torso_;
@@ -1340,6 +1343,7 @@ private:
     return true;
   }
 
+  // effort 모드에서는 PD 결과에 tilt 보정 effort를 직접 더한다.
   void apply_tilt_feedback_effort(
       sensor_msgs::msg::JointState &cmd_msg, std::size_t usable_count, const rbci::TiltFeedbackCommand &tilt_cmd)
   {
@@ -1380,6 +1384,7 @@ private:
     add_effort(idx_torso_, +tilt_cmd.u_pitch * tilt_cmd.pitch_w_torso);
   }
 
+  // qref_bias 모드에서는 effort를 바로 더하지 않고, 목표 자세(q_ref) 자체를 살짝 움직여 복원 방향을 만든다.
   void apply_tilt_feedback_qref_bias(
       std::vector<double> &effective_q_ref, const rbci::TiltFeedbackCommand &tilt_cmd)
   {
@@ -1577,6 +1582,7 @@ private:
       return;
     }
 
+    // tilt cut이 걸리면 stand PD 전체 출력을 비율로 낮춰 급격한 발산을 막는다.
     const double stand_output_scale = compute_stand_output_scale();
     last_stand_output_scale_ = stand_output_scale;
     std::vector<double> effective_q_ref = stand_q_ref_active_;
@@ -1600,6 +1606,11 @@ private:
     double ankle_pre_clamp_sum = 0.0;
     std::size_t ankle_sample_count = 0U;
 
+    // 핵심 흐름:
+    // 1) q_ref와 현재 joint 상태로 기본 PD effort 계산
+    // 2) limit avoid를 더함
+    // 3) tilt cut scale을 곱함
+    // 4) 필요하면 tilt feedback을 추가 반영
     for (std::size_t i = 0; i < usable_count; ++i)
     {
       if (i >= stand_control_mask_.size() || stand_control_mask_[i] == 0U)
@@ -1636,6 +1647,7 @@ private:
       }
     }
 
+    // effort 모드는 기본 PD 출력이 완성된 뒤 마지막에 additive effort로 얹는다.
     if (has_tilt_cmd && tilt_apply_mode_ == "effort")
     {
       apply_tilt_feedback_effort(cmd_msg, usable_count, tilt_cmd);
@@ -1707,6 +1719,7 @@ private:
       return 1.0;
     }
 
+    // roll/pitch 중 더 큰 축을 기준으로 현재 기울기 위험도를 본다.
     const double tilt_abs = std::max(
         std::abs(estimated_state_.tilt_roll_rad), std::abs(estimated_state_.tilt_pitch_rad));
     if (!stand_tilt_cut_active_)

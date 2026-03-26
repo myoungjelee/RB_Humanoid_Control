@@ -330,6 +330,7 @@ private:
       return;
     }
 
+    // safety는 command_raw를 복사한 뒤, 그 복사본에 clamp/timeout/tilt 필터를 적용해 command_safe로 내보낸다.
     sensor_msgs::msg::JointState out = *msg;
     const auto now_steady = std::chrono::steady_clock::now();
     latest_raw_command_ = out;
@@ -349,6 +350,7 @@ private:
       return;
     }
 
+    // 조인트 limit/velocity safety는 이름 기반 맵으로 읽기 때문에 최신 상태를 맵 형태로 캐시한다.
     latest_joint_positions_.clear();
     latest_joint_velocities_.clear();
     latest_joint_names_ = msg->name;
@@ -376,6 +378,7 @@ private:
       return;
     }
 
+    // tilt safety는 estimator가 valid하다고 판정한 IMU state만 사용한다.
     latest_estimated_state_valid_ = msg->imu_valid;
     if (!msg->imu_valid)
     {
@@ -398,6 +401,7 @@ private:
       return;
     }
 
+    // controller가 멈추더라도 safe command를 계속 보내 articulation이 마지막 effort에 매달리지 않게 한다.
     const auto now_steady = std::chrono::steady_clock::now();
     if (!is_input_timeout(now_steady))
     {
@@ -433,6 +437,7 @@ private:
       return;
     }
 
+    // 각 safety check는 독립적으로 계산하고, 마지막 reason은 우선순위에 따라 하나만 남긴다.
     const bool clamp_active = apply_effort_clamp(cmd_msg);
     const bool joint_limit_active = apply_joint_limit_guard(cmd_msg);
     const bool timeout_active = is_input_timeout(now_steady);
@@ -540,6 +545,7 @@ private:
       bool limited = false;
       std::string trigger = "";
 
+      // soft bound 안쪽에서는 더 바깥으로 미는 effort만 막고, 안쪽으로 복귀시키는 effort는 허용한다.
       if (position <= soft_lower && effort_cmd < 0.0)
       {
         effort_cmd = 0.0;
@@ -632,6 +638,7 @@ private:
 
     velocity_limit_debug_info_.valid = false;
     std::size_t hit_count = 0;
+    // 속도 초과는 effort clamp와 달리 "현재 로봇 상태가 위험하다"는 신호라 safe action으로 바로 이어진다.
     for (const auto &kv : latest_joint_velocities_)
     {
       const double limit = velocity_limit_for_joint(kv.first);
@@ -688,6 +695,7 @@ private:
       return false;
     }
 
+    // tilt는 estimator가 이미 G1 기준 roll/pitch로 정리한 값을 그대로 사용한다.
     const bool roll_exceeded =
         (tilt_limit_roll_rad_ > 0.0) && (std::abs(latest_roll_rad_) > tilt_limit_roll_rad_);
     const bool pitch_exceeded =

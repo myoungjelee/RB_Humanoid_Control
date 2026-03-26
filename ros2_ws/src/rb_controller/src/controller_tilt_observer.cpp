@@ -7,6 +7,7 @@ namespace rb_controller::internal
 
 void TiltObserver::update_from_imu(const sensor_msgs::msg::Imu &msg)
 {
+  // ROS IMU quaternion을 먼저 일반적인 roll/pitch로 풀어낸다.
   const double x = msg.orientation.x;
   const double y = msg.orientation.y;
   const double z = msg.orientation.z;
@@ -26,7 +27,8 @@ void TiltObserver::update_from_imu(const sensor_msgs::msg::Imu &msg)
   const double corrected_roll = normalize_angle_rad(roll);
   const double corrected_pitch = pitch;
 
-  // G1 imu_link 축을 control-frame roll/pitch 해석에 맞춘 고정 보정.
+  // G1에서는 imu_link raw 축과 controller가 기대하는 roll/pitch 축이 다르기 때문에
+  // 여기서 control-frame 기준 tilt/rate로 고정 변환한다.
   tilt_roll_rad_ = normalize_angle_rad(corrected_pitch);
   tilt_pitch_rad_ = corrected_roll;
   roll_rate_rad_s_ = msg.angular_velocity.y;

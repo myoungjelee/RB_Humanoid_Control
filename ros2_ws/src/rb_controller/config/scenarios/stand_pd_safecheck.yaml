@@ -1,5 +1,7 @@
 rb_controller:
   ros__parameters:
+    # M7 safety 재검증용 controller baseline.
+    # 목표는 "이미 확보한 standing을 safety-on 상태에서도 그대로 유지하는가" 확인하는 것이다.
     signal_mode: stand_pd
     log_interval_sec: 0.2
     # M7: controller-only로 이미 확보한 standing baseline 위에 safety만 다시 올린다.
@@ -64,6 +66,8 @@ rb_controller:
         right_ankle_roll_joint,
       ]
     stand_pos_error_abs_max: 0.18
+    # 관절군별 gain scale.
+    # base stand_kp/kd는 공통값으로 두고, hip/knee/ankle/torso별 상대 강도만 여기서 조절한다.
     stand_kp_scale_hip: 1.5
     stand_kd_scale_hip: 1.2
     stand_kp_scale_knee: 1.2
@@ -75,7 +79,8 @@ rb_controller:
     stand_tilt_cut_enable: false
     enable_tilt_feedback: true
     tilt_apply_mode: qref_bias
-    # G1 imu_link raw 축을 controller pitch/roll 해석과 맞추는 observer-side 보정.
+    # tilt feedback 블록.
+    # raw IMU를 직접 쓰지 않고, estimator가 정리한 tilt/rate를 hip/knee/ankle/torso bias로 분배한다.
     tilt_qref_bias_abs_max: 0.15
     tilt_kp_roll: 10.0
     tilt_kd_roll: 2.0
@@ -90,6 +95,8 @@ rb_controller:
     tilt_weight_pitch_knee: 0.15
     tilt_weight_pitch_torso: 0.05
     limit_avoid_enable: true
+    # limit avoid 블록.
+    # hard safety 전에 controller 레벨에서 limit 근처 바깥 방향 effort를 미리 줄인다.
     limit_avoid_margin_rad: 0.08
     limit_avoid_kp: 10.0
     limit_avoid_kd: 2.0
@@ -144,6 +151,8 @@ rb_controller:
 
 rb_safety:
   ros__parameters:
+    # M7 safety baseline.
+    # controller 출력은 유지하되, timeout/tilt/velocity/joint_limit 방어가 정상적으로 개입하는지 본다.
     input_command_topic: /rb/command_raw
     output_command_topic: /rb/command_safe
     input_joint_states_topic: /rb/joint_states

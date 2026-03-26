@@ -21,11 +21,14 @@ inline double quiet_nan()
 struct TiltFeedbackCommand
 {
   bool valid{false};
+  // 최종 보정량. qref_bias 모드면 각도 bias, effort 모드면 additive effort로 쓰인다.
   double u_roll{0.0};
   double u_pitch{0.0};
+  // 로그에서 P/D 항 기여도를 분리해 보기 위해 pitch 쪽만 raw/P/D를 따로 남긴다.
   double u_pitch_raw{quiet_nan()};
   double u_pitch_p{quiet_nan()};
   double u_pitch_d{quiet_nan()};
+  // 각 보정량을 hip/ankle/knee/torso 체인에 얼마 비율로 나눌지 정의하는 weight다.
   double roll_w_hip{0.0};
   double roll_w_ankle{0.0};
   double roll_w_torso{0.0};
