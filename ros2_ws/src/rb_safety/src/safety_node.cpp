@@ -8,7 +8,7 @@
 #include <unordered_map>
 #include <vector>
 
-#include "rb_controller/msg/estimated_state.hpp"
+#include "rb_interfaces/msg/estimated_state.hpp"
 #include "rclcpp/rclcpp.hpp"
 #include "rcl_interfaces/msg/set_parameters_result.hpp"
 #include "sensor_msgs/msg/joint_state.hpp"
@@ -89,7 +89,7 @@ public:
     joint_state_sub_ = this->create_subscription<sensor_msgs::msg::JointState>(
         input_joint_states_topic_, 10,
         std::bind(&RbSafetyNode::on_joint_state, this, std::placeholders::_1));
-    estimated_state_sub_ = this->create_subscription<rb_controller::msg::EstimatedState>(
+    estimated_state_sub_ = this->create_subscription<rb_interfaces::msg::EstimatedState>(
         input_estimated_state_topic_, 10,
         std::bind(&RbSafetyNode::on_estimated_state, this, std::placeholders::_1));
     watchdog_timer_ = this->create_wall_timer(
@@ -336,6 +336,16 @@ private:
     latest_raw_command_ = out;
     latest_command_received_ = true;
     latest_command_time_steady_ = now_steady;
+    // startup timeout은 "첫 valid command를 받은 뒤부터"만 의미가 있다.
+    // bringup 초기에 hardware/write 경로가 아직 command를 한 번도 못 내보낸 상태는
+    // 장애가 아니라 sequencing 단계이므로 timeout을 무시한다.
+    if (!timeout_monitor_armed_)
+    {
+      timeout_monitor_armed_ = true;
+      RCLCPP_INFO(
+          this->get_logger(),
+          "rb_safety timeout watchdog armed: first command received");
+    }
     apply_safety_filters(out, now_steady);
     command_pub_->publish(out);
   }
@@ -371,7 +381,7 @@ private:
   /**
    * @brief /rb/imu 수신 콜백: roll/pitch 추정을 위한 최신 자세를 저장한다.
    */
-  void on_estimated_state(const rb_controller::msg::EstimatedState::SharedPtr msg)
+  void on_estimated_state(const rb_interfaces::msg::EstimatedState::SharedPtr msg)
   {
     if (!msg)
     {
@@ -611,10 +621,11 @@ private:
       return false;
     }
 
-    if (!latest_command_received_)
+    // 첫 command 전 startup 구간은 timeout 감시를 아직 시작하지 않는다.
+    // 그렇지 않으면 native plugin/hardware sequencing 초기에 불필요한 TIMEOUT 1회가 생긴다.
+    if (!timeout_monitor_armed_ || !latest_command_received_)
     {
-      const double startup_elapsed = std::chrono::duration<double>(now_steady - node_start_steady_).count();
-      return startup_elapsed > input_timeout_sec_;
+      return false;
     }
 
     const double command_stale_sec =
@@ -1014,6 +1025,7 @@ private:
   std::chrono::steady_clock::time_point latest_estimated_state_time_steady_;
 
   bool latest_command_received_{false};
+  bool timeout_monitor_armed_{false};
   bool latest_joint_state_received_{false};
   bool latest_estimated_state_received_{false};
   bool latest_estimated_state_valid_{false};
@@ -1024,7 +1036,7 @@ private:
   rclcpp::Publisher<sensor_msgs::msg::JointState>::SharedPtr command_pub_;
   rclcpp::Subscription<sensor_msgs::msg::JointState>::SharedPtr command_sub_;
   rclcpp::Subscription<sensor_msgs::msg::JointState>::SharedPtr joint_state_sub_;
-  rclcpp::Subscription<rb_controller::msg::EstimatedState>::SharedPtr estimated_state_sub_;
+  rclcpp::Subscription<rb_interfaces::msg::EstimatedState>::SharedPtr estimated_state_sub_;
   rclcpp::TimerBase::SharedPtr watchdog_timer_;
   OnSetParametersCallbackHandle::SharedPtr param_callback_handle_;
 };

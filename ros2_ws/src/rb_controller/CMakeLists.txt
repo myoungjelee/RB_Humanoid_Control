@@ -7,58 +7,37 @@ endif()
 
 # 의존 패키지 찾기
 find_package(ament_cmake REQUIRED)
-find_package(builtin_interfaces REQUIRED)
-find_package(rosidl_default_generators REQUIRED)
+find_package(rb_interfaces REQUIRED)
+find_package(rcl_interfaces REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(sensor_msgs REQUIRED)
 find_package(std_msgs REQUIRED)
 
-rosidl_generate_interfaces(${PROJECT_NAME}
-  "msg/EstimatedState.msg"
-  DEPENDENCIES std_msgs builtin_interfaces
-)
-
 add_executable(rb_controller_node
   src/controller_node.cpp
-  src/controller_tilt_observer.cpp
   src/controller_debug_logger.cpp
   src/controller_stand_utils.cpp
 )
 
-add_executable(rb_estimator_node
-  src/estimator_node.cpp
-  src/controller_tilt_observer.cpp
-)
-
-add_executable(rb_safety_node
-  src/safety_node.cpp
+add_executable(rb_command_bridge_node
+  src/command_bridge_node.cpp
 )
 
 target_compile_features(rb_controller_node PUBLIC cxx_std_17)
-target_compile_features(rb_estimator_node PUBLIC cxx_std_17)
-target_compile_features(rb_safety_node PUBLIC cxx_std_17)
+target_compile_features(rb_command_bridge_node PUBLIC cxx_std_17)
 ament_target_dependencies(rb_controller_node
-  builtin_interfaces
+  rb_interfaces
+  rcl_interfaces
   rclcpp
   sensor_msgs
 )
-ament_target_dependencies(rb_estimator_node
-  builtin_interfaces
+ament_target_dependencies(rb_command_bridge_node
   rclcpp
   sensor_msgs
-)
-ament_target_dependencies(rb_safety_node
-  builtin_interfaces
-  rclcpp
-  sensor_msgs
+  std_msgs
 )
 
-rosidl_get_typesupport_target(cpp_typesupport_target ${PROJECT_NAME} "rosidl_typesupport_cpp")
-target_link_libraries(rb_controller_node "${cpp_typesupport_target}")
-target_link_libraries(rb_estimator_node "${cpp_typesupport_target}")
-target_link_libraries(rb_safety_node "${cpp_typesupport_target}")
-
-install(TARGETS rb_controller_node rb_estimator_node rb_safety_node
+install(TARGETS rb_controller_node rb_command_bridge_node
   DESTINATION lib/${PROJECT_NAME}
 )
 
@@ -76,7 +55,5 @@ if(BUILD_TESTING)
   set(ament_cmake_cpplint_FOUND TRUE)
   ament_lint_auto_find_test_dependencies()
 endif()
-
-ament_export_dependencies(rosidl_default_runtime)
 
 ament_package()

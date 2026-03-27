@@ -1,0 +1,10 @@
+<library path="rb_standing_controller">
+  <class
+    name="rb_standing_controller/RBStandingController"
+    type="rb_standing_controller::RBStandingController"
+    base_class_type="controller_interface::ControllerInterface">
+    <description>
+      Native ros2_control standing controller skeleton for RB Humanoid.
+    </description>
+  </class>
+</library>

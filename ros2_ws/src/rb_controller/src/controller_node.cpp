@@ -12,7 +12,7 @@
 #include <utility>
 #include <vector>
 
-#include "rb_controller/msg/estimated_state.hpp"
+#include "rb_interfaces/msg/estimated_state.hpp"
 #include "controller_debug_logger.hpp"
 #include "controller_types.hpp"
 #include "controller_stand_utils.hpp"
@@ -236,7 +236,7 @@ public:
 
     // 제어 명령 publish, estimated_state subscribe 배선
     command_pub_ = this->create_publisher<sensor_msgs::msg::JointState>(output_topic_, 10);
-    estimated_state_sub_ = this->create_subscription<rb_controller::msg::EstimatedState>(
+    estimated_state_sub_ = this->create_subscription<rb_interfaces::msg::EstimatedState>(
         input_topic_, 10,
         std::bind(&RbControllerNode::on_estimated_state, this, std::placeholders::_1));
 
@@ -291,7 +291,7 @@ private:
    * @brief /rb/estimated_state에서 조인트/기울기 상태를 캐시한다.
    * @param msg 수신된 EstimatedState 메시지
    */
-  void on_estimated_state(const rb_controller::msg::EstimatedState::SharedPtr msg)
+  void on_estimated_state(const rb_interfaces::msg::EstimatedState::SharedPtr msg)
   {
     if (!msg || msg->joint_names.empty())
     {
@@ -2144,7 +2144,7 @@ private:
 
   // ===== ROS2 통신 핸들 =====
   rclcpp::Publisher<sensor_msgs::msg::JointState>::SharedPtr command_pub_;
-  rclcpp::Subscription<rb_controller::msg::EstimatedState>::SharedPtr estimated_state_sub_;
+  rclcpp::Subscription<rb_interfaces::msg::EstimatedState>::SharedPtr estimated_state_sub_;
   rclcpp::TimerBase::SharedPtr control_timer_;
   OnSetParametersCallbackHandle::SharedPtr param_callback_handle_;
 };

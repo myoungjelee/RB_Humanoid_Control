@@ -1,0 +1,294 @@
+# ros2_control 기본 bringup 설정
+# - rb_effort_forward_controller: 전환형(adapter) 경로 점검용 표준 relay controller
+# - rb_standing_controller: 최종 native path로 옮길 custom standing controller plugin
+# 현재 repo는 두 경로를 모두 들고 있고, launch에서 둘 중 하나만 켜도록 한다.
+
+controller_manager:
+  ros__parameters:
+    update_rate: 200
+
+    joint_state_broadcaster:
+      type: joint_state_broadcaster/JointStateBroadcaster
+
+    # ros2_control -> hardware_interface.write() 경로를 먼저 검증하기 위한 표준 컨트롤러
+    # /rb_effort_forward_controller/commands 로 effort 배열을 넣으면
+    # controller_manager가 그 값을 hardware interface command buffer에 적고,
+    # RBHardwareSystem.write()가 이를 Isaac command topic으로 내보낸다.
+    rb_effort_forward_controller:
+      type: forward_command_controller/ForwardCommandController
+
+    # native ros2_control standing controller.
+    # 기존 rb_controller_node의 stand_pd 핵심 계산을 plugin 안으로 옮겨,
+    # controller_manager가 직접 low-level effort를 쓰게 만든다.
+    rb_standing_controller:
+      type: rb_standing_controller/RBStandingController
+
+rb_effort_forward_controller:
+  ros__parameters:
+    interface_name: effort
+    joints:
+      - left_hip_pitch_joint
+      - right_hip_pitch_joint
+      - torso_joint
+      - left_hip_roll_joint
+      - right_hip_roll_joint
+      - left_shoulder_pitch_joint
+      - right_shoulder_pitch_joint
+      - left_hip_yaw_joint
+      - right_hip_yaw_joint
+      - left_shoulder_roll_joint
+      - right_shoulder_roll_joint
+      - left_knee_joint
+      - right_knee_joint
+      - left_shoulder_yaw_joint
+      - right_shoulder_yaw_joint
+      - left_ankle_pitch_joint
+      - right_ankle_pitch_joint
+      - left_elbow_pitch_joint
+      - right_elbow_pitch_joint
+      - left_ankle_roll_joint
+      - right_ankle_roll_joint
+      - left_elbow_roll_joint
+      - right_elbow_roll_joint
+      - left_five_joint
+      - left_three_joint
+      - left_zero_joint
+      - right_five_joint
+      - right_three_joint
+      - right_zero_joint
+      - left_six_joint
+      - left_four_joint
+      - left_one_joint
+      - right_six_joint
+      - right_four_joint
+      - right_one_joint
+      - left_two_joint
+      - right_two_joint
+
+rb_standing_controller:
+  ros__parameters:
+    # joint position/velocity는 ros2_control state interface에서 읽고,
+    # tilt/rate 같은 보조 추정값만 /rb/estimated_state에서 받는다.
+    estimated_state_topic: /rb/estimated_state
+    joints:
+      - left_hip_pitch_joint
+      - right_hip_pitch_joint
+      - torso_joint
+      - left_hip_roll_joint
+      - right_hip_roll_joint
+      - left_shoulder_pitch_joint
+      - right_shoulder_pitch_joint
+      - left_hip_yaw_joint
+      - right_hip_yaw_joint
+      - left_shoulder_roll_joint
+      - right_shoulder_roll_joint
+      - left_knee_joint
+      - right_knee_joint
+      - left_shoulder_yaw_joint
+      - right_shoulder_yaw_joint
+      - left_ankle_pitch_joint
+      - right_ankle_pitch_joint
+      - left_elbow_pitch_joint
+      - right_elbow_pitch_joint
+      - left_ankle_roll_joint
+      - right_ankle_roll_joint
+      - left_elbow_roll_joint
+      - right_elbow_roll_joint
+      - left_five_joint
+      - left_three_joint
+      - left_zero_joint
+      - right_five_joint
+      - right_three_joint
+      - right_zero_joint
+      - left_six_joint
+      - left_four_joint
+      - left_one_joint
+      - right_six_joint
+      - right_four_joint
+      - right_one_joint
+      - left_two_joint
+      - right_two_joint
+    command_interface_name: effort
+    state_interface_names:
+      - position
+      - velocity
+      - effort
+    # 공통 standing baseline은 현재까지 disturbance compare에서 가장 안정적이었던
+    # M8 tuned 값으로 둔다. M5/M7/M8는 이 값을 함께 쓰고, milestone별 차이는
+    # safety profile과 enable_tilt_feedback overlay에서만 둔다.
+    # M11에서 더 정밀한 tuning이 끝나면 그 값을 새 baseline으로 승격한다.
+    stand_kp: 50.0
+    stand_kd: 3.5
+    stand_effort_abs_max: 18.0
+    stand_hold_current_on_start: false
+    stand_q_ref:
+      [
+        -0.20,
+        -0.20,
+        0.0,
+        0.0,
+        0.0,
+        0.35,
+        0.35,
+        0.0,
+        0.0,
+        0.16,
+        -0.16,
+        0.42,
+        0.42,
+        0.0,
+        0.0,
+        -0.23,
+        -0.23,
+        0.87,
+        0.87,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        1.0,
+        0.0,
+        0.0,
+        -1.0,
+        0.52,
+        -0.52,
+      ]
+    stand_q_ref_trim:
+      [
+        0.005,
+        0.005,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.005,
+        0.005,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+      ]
+    stand_control_joints:
+      - left_hip_pitch_joint
+      - right_hip_pitch_joint
+      - torso_joint
+      - left_hip_roll_joint
+      - right_hip_roll_joint
+      - left_hip_yaw_joint
+      - right_hip_yaw_joint
+      - left_knee_joint
+      - right_knee_joint
+      - left_ankle_pitch_joint
+      - right_ankle_pitch_joint
+      - left_ankle_roll_joint
+      - right_ankle_roll_joint
+    stand_pos_error_abs_max: 0.18
+    stand_kp_scale_hip: 1.5
+    stand_kd_scale_hip: 1.2
+    stand_kp_scale_knee: 1.2
+    stand_kd_scale_knee: 1.0
+    stand_kp_scale_ankle: 2.5
+    stand_kd_scale_ankle: 1.8
+    stand_kp_scale_torso: 2.0
+    stand_kd_scale_torso: 1.5
+    stand_tilt_cut_enable: false
+    stand_tilt_cut_rad: 0.40
+    stand_tilt_recover_rad: 0.30
+    stand_tilt_cut_output_scale: 0.30
+    limit_avoid_enable: true
+    limit_avoid_margin_rad: 0.08
+    limit_avoid_kp: 10.0
+    limit_avoid_kd: 2.0
+    limit_avoid_joint_names:
+      - left_hip_pitch_joint
+      - right_hip_pitch_joint
+      - torso_joint
+      - left_hip_roll_joint
+      - right_hip_roll_joint
+      - left_hip_yaw_joint
+      - right_hip_yaw_joint
+      - left_knee_joint
+      - right_knee_joint
+      - left_ankle_pitch_joint
+      - right_ankle_pitch_joint
+      - left_ankle_roll_joint
+      - right_ankle_roll_joint
+    limit_avoid_lower:
+      - -2.349999711181
+      - -2.349999711181
+      - -2.618000003262
+      - -0.259999973074
+      - -2.529999839782
+      - -2.749999849008
+      - -2.749999849008
+      - -0.334889977074
+      - -0.334889977074
+      - -0.679999967990
+      - -0.679999967990
+      - -0.261799970366
+      - -0.261799970366
+    limit_avoid_upper:
+      - 3.049999885799
+      - 3.049999885799
+      - 2.618000003262
+      - 2.529999839782
+      - 0.259999973074
+      - 2.749999849008
+      - 2.749999849008
+      - 2.544899693449
+      - 2.544899693449
+      - 0.729999951929
+      - 0.729999951929
+      - 0.261799970366
+      - 0.261799970366
+    enable_tilt_feedback: true
+    tilt_kp_roll: 2.0
+    tilt_kd_roll: 0.4
+    tilt_kp_pitch: 8.0
+    tilt_kd_pitch: 1.6
+    tilt_deadband_rad: 0.03
+    tilt_apply_mode: qref_bias
+    tilt_effort_abs_max: 4.0
+    tilt_qref_bias_abs_max: 0.03
+    tilt_roll_sign: 1.0
+    tilt_pitch_sign: 1.0
+    tilt_weight_roll_hip: 0.7
+    tilt_weight_roll_ankle: 0.3
+    tilt_weight_roll_torso: 0.0
+    tilt_weight_pitch_hip: 0.8
+    tilt_weight_pitch_ankle: 0.7
+    tilt_weight_pitch_knee: 0.15
+    tilt_weight_pitch_torso: 0.05

@@ -1,33 +1,61 @@
 session_name: rb_m5_stand
 start_directory: /home/leemou/Projects/RB_Humanoid_Control
 shell_command_before:
+  - export ROOT_DIR="$HOME/Projects/RB_Humanoid_Control"
   - export RUN_ID="${RUN_ID:?Set RUN_ID before tmuxp load}"
-  - export BASE="$HOME/Projects/RB_Humanoid_Control/logs/sim2real/m5/$RUN_ID"
-  - mkdir -p "$BASE/m5"
+  - export PROFILE_PATH="${PROFILE_PATH:-$ROOT_DIR/ops/profiles/m5_stand.env}"
+  - set -a
+  - source "$PROFILE_PATH"
+  - set +a
+  - export BASE="$ROOT_DIR/logs/sim2real/$LOG_NAMESPACE/$RUN_ID/$LOG_LEAF"
+  - export SESSION_NAME="${SESSION_NAME:-$SESSION_NAME_DEFAULT}"
+  - export CAPTURE_MAX_SEC="${CAPTURE_MAX_SEC:-$CAPTURE_MAX_SEC_DEFAULT}"
+  - export POST_SYNC_CAPTURE_SEC="${POST_SYNC_CAPTURE_SEC:-$POST_SYNC_CAPTURE_SEC_DEFAULT}"
+  - export POST_FALL_CAPTURE_SEC="${POST_FALL_CAPTURE_SEC:-$POST_FALL_CAPTURE_SEC_DEFAULT}"
+  - export AUTO_KILL_AFTER_CAPTURE="${AUTO_KILL_AFTER_CAPTURE:-$AUTO_KILL_AFTER_CAPTURE_DEFAULT}"
+  - export STACK_PARAMS_PATH="${STACK_PARAMS_PATH:-$STACK_PARAMS_PATH_DEFAULT}"
+  - export CONTROLLERS_PATH="${CONTROLLERS_PATH:-$CONTROLLERS_PATH_DEFAULT}"
+  - mkdir -p "$BASE"
 windows:
   - window_name: m5_stand
-    layout: main-vertical
+    layout: tiled
     panes:
       - shell_command:
           - cd /home/leemou/Projects/RB_Humanoid_Control
-          - python main.py --phase m5_stand 2>&1 | tee "$BASE/m5/isaac.log"
+          - python main.py --phase "$ISAAC_PHASE" 2>&1 | tee "$BASE/isaac.log"
       - shell_command:
-          - cd /home/leemou/Projects/RB_Humanoid_Control/ros2_ws
+          - cd /home/leemou/Projects/RB_Humanoid_Control
           - source /opt/ros/humble/setup.bash
-          - source install/setup.bash
-          - echo "[WAIT] sleeping 15s for Isaac startup"
-          - sleep 15
-          - until timeout 1 ros2 topic echo --once /clock >/dev/null 2>&1; do echo "[WAIT] /clock not ready yet"; sleep 1; done
-          - timeout 60 ros2 launch rb_controller controller.launch.py params_file:=/home/leemou/Projects/RB_Humanoid_Control/ros2_ws/src/rb_controller/config/scenarios/stand_pd_default.yaml 2>&1 | tee "$BASE/m5/m5_stand.log"
+          - source ros2_ws/install/setup.bash
+          - export ROS_LOG_DIR=/tmp/ros_logs
+          - ros2 launch rb_bringup ros2_control.launch.py controllers_file:="$CONTROLLERS_PATH" command_topic:=/rb/command_raw 2>&1 | tee "$BASE/ros2_control.log"
+      - shell_command:
+          - cd /home/leemou/Projects/RB_Humanoid_Control
+          - source /opt/ros/humble/setup.bash
+          - source ros2_ws/install/setup.bash
+          - export ROS_LOG_DIR=/tmp/ros_logs
+          - timeout "$CAPTURE_MAX_SEC" ros2 launch rb_bringup native_stack.launch.py params_file:="$STACK_PARAMS_PATH" 2>&1 | tee "$BASE/native_stack.log"
           - exec bash
       - shell_command:
-          - echo "[WAIT] waiting for controller start log"
-          - until rg -q "rb_controller started" "$BASE/m5/m5_stand.log" 2>/dev/null; do sleep 1; done
-          - echo "[WAIT] watching for first safety reason (max 60s)"
-          - 'for i in $(seq 1 60); do if rg -q "safety active: reason=" "$BASE/m5/m5_stand.log" 2>/dev/null; then echo "[EVENT] first safety reason detected"; sleep 2; break; fi; sleep 1; done'
-          - 'if ! rg -q "safety active: reason=" "$BASE/m5/m5_stand.log" 2>/dev/null; then echo "[FALLBACK] no safety reason within 60s"; fi'
-          - rg "rb_controller started" "$BASE/m5/m5_stand.log" | head -n 1 | tee "$BASE/m5/start.txt"
-          - 'rg "safety active: reason=" "$BASE/m5/m5_stand.log" | sed -E ''s/.*reason=([A-Z_]+).*/\\1/'' | sort | uniq -c | tee "$BASE/m5/reason_count.txt"'
-          - rg "loop_stats" "$BASE/m5/m5_stand.log" | tail -n 8 | tee "$BASE/m5/loop_tail.txt"
-          - echo "[CAPTURE] signal_mode=stand_pd + reason_count + loop_tail"
+          - cd /home/leemou/Projects/RB_Humanoid_Control
+          - source /opt/ros/humble/setup.bash
+          - source ros2_ws/install/setup.bash
+          - 'echo "[INFO] M5 native stand session: relaxed safety baseline + native standing plugin"'
+          - echo "[WAIT] waiting for standing controller activation (max ${CAPTURE_MAX_SEC}s)"
+          - 'for i in $(seq 1 "$CAPTURE_MAX_SEC"); do if rg -q "Configured and activated rb_standing_controller|native stand_pd reference ready" "$BASE/ros2_control.log" 2>/dev/null; then echo "[EVENT] standing controller active"; break; fi; sleep 1; done'
+          - echo "[WAIT] waiting for first /rb/estimated_state sample (max ${CAPTURE_MAX_SEC}s)"
+          - 'for i in $(seq 1 "$CAPTURE_MAX_SEC"); do if rg -q "received first /rb/estimated_state sample" "$BASE/ros2_control.log" 2>/dev/null; then echo "[EVENT] first estimated_state sample"; break; fi; sleep 1; done'
+          - echo "[WAIT] watching for FALL_EVENT up to ${POST_SYNC_CAPTURE_SEC}s"
+          - 'FALL_FOUND=0; for i in $(seq 1 "$POST_SYNC_CAPTURE_SEC"); do if rg -q "\[FALL_EVENT\]" "$BASE/isaac.log" 2>/dev/null; then FALL_FOUND=1; echo "[EVENT] fall detected"; break; fi; sleep 1; done; if [ "$FALL_FOUND" = "1" ]; then echo "[WAIT] capturing ${POST_FALL_CAPTURE_SEC}s after fall"; sleep "$POST_FALL_CAPTURE_SEC"; else echo "[FALLBACK] no FALL_EVENT within ${POST_SYNC_CAPTURE_SEC}s"; fi'
+          - 'if rg -q "\[FALL_EVENT\]" "$BASE/isaac.log" 2>/dev/null; then rg "\[FALL_EVENT\]" "$BASE/isaac.log" | tail -n 1 | tee "$BASE/fall_event.txt"; else echo "[NO_FALL_EVENT] capture_window_sec=${POST_SYNC_CAPTURE_SEC}" | tee "$BASE/fall_event.txt"; fi'
+          - 'timeout 3 ros2 topic echo --once /rb/command_raw | tee "$BASE/command_raw_once.txt" || true'
+          - 'timeout 3 ros2 topic echo --once /rb/command_safe | tee "$BASE/command_safe_once.txt" || true'
+          - 'echo "[ISAAC]" > "$BASE/sync_markers.txt"'
+          - 'rg "\[SYNC\]|\[FALL_EVENT\]" "$BASE/isaac.log" >> "$BASE/sync_markers.txt" || true'
+          - 'echo "[NATIVE]" >> "$BASE/sync_markers.txt"'
+          - 'rg "rb_estimator started|rb_safety started|first command received|safety active: reason=" "$BASE/native_stack.log" >> "$BASE/sync_markers.txt" || true'
+          - 'cat "$BASE/sync_markers.txt"'
+          - 'if rg -q "safety active: reason=" "$BASE/native_stack.log" 2>/dev/null; then rg "safety active: reason=" "$BASE/native_stack.log" | sed -E "s/.*reason=([A-Z_]+).*/\\1/" | sort | uniq -c | tee "$BASE/reason_count.txt"; else echo "[NO_SAFETY_REASON] capture_window_sec=${POST_SYNC_CAPTURE_SEC}" | tee "$BASE/reason_count.txt"; fi'
+          - echo "[CAPTURE] native relaxed stand + fall/no-fall + command_raw/safe"
+          - 'if [ "${AUTO_KILL_AFTER_CAPTURE}" = "1" ]; then echo "[SESSION] auto-kill after capture"; tmux kill-session -t "$SESSION_NAME"; fi'
           - exec bash

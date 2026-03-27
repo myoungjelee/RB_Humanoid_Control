@@ -24,6 +24,15 @@
 - mixed command path 정리(effort-only 경로 정리)
 - tmuxp 기반 재검증 플로우 정리
 - standalone backend code path를 `isaaclab_assets.robots.unitree.G1_CFG` direct spawn 기준으로 전환
+- `rb_controller` 패키지 책임도 다시 나눴다. 공용 메시지는 `rb_interfaces`, 추정은 `rb_estimation`, safety는 `rb_safety`로 분리했고, `rb_controller`는 legacy controller + bridge + scenario/launch 중심 패키지로 가볍게 정리했다.
+- active native path는 이제 `rb_controller` launch에 기대지 않는다. `rb_bringup/native_stack.launch.py`와 `rb_bringup/config/m7_stack_safety_on.yaml`이 `rb_estimator + rb_safety` 기본 경로를 소유하고, `rb_controller`는 legacy fallback 패키지로만 남는다.
+- `rb_controller/COLCON_IGNORE`도 추가했다. 즉 현재 workspace 기본 build 대상에서는 빠지고, 정말 legacy replay가 필요할 때만 ignore를 치우는 구조다.
+- native standing smoke에서 safety가 자르는 `tilt_limit_roll/pitch_rad`는 xacro joint lower/upper와 다른 **정책 임계값**이다. 즉 실제 기구학 리밋은 xacro 값을 유지하고, controller 검사용으로는 safety 임계값만 별도 조정한다.
+- 이를 위해 `rb_bringup/config/m5_stack_relaxed.yaml`을 추가했다. 이 파일은 xacro와 같은 joint lower/upper를 유지한 채 `tilt_limit_roll/pitch_rad`만 `1.2 rad`로 완화해, native standing controller 자체가 얼마나 버티는지 먼저 볼 때 사용한다.
+- `20260327-144400_m10_5_native_stack_relaxed` 기준으로는 이 목적이 달성됐다. 초기 `TIMEOUT` 1회 후 safety가 clear됐고, `command_safe_once.txt`에 nonzero leg effort가 남았다. 즉 이 시점부터는 native path에서 robot이 넘어지는 원인을 safety gate가 아니라 standing controller baseline/tuning 쪽에서 봐야 한다.
+- xacro/source-of-truth 정합성도 다시 점검했다. `rb_safety.joint_limits.*`는 xacro와 맞고, `rb_standing_controller.limit_avoid_lower`의 ankle pitch lower 두 값도 `-0.75 -> -0.67999996799`로 바로잡았다. 이어서 `stand_qref_g1_seed.yaml`과 plugin `stand_q_ref`를 비교해 `left/right_hip_yaw_joint`, `left/right_shoulder_roll_joint` 값 4개가 뒤바뀐 것도 수정했다. 즉 지금은 spawn seed와 native plugin nominal reference도 같은 기준을 쓴다.
+- startup sequencing 때문에 native smoke 초반에 `TIMEOUT` 1회가 찍히던 것도 정리했다. `rb_safety`는 이제 "첫 valid command를 받은 뒤부터만 timeout watchdog을 arm"한다. 즉 첫 `/rb/command_raw` 전 startup 대기 구간은 장애로 보지 않고, 그 이후부터만 stale command를 timeout으로 판정한다.
+- legacy/native A/B 비교용 `stand_pd_native_compare_relaxed.yaml`은 정리 단계에서 제거했다. active source-of-truth는 이제 `rb_standing_controller` native path 하나다.
 
 ### standalone 재검증
 - M1 완료
@@ -78,7 +87,7 @@
 - controller/safety 모두에 `imu_zero_on_start`를 추가해 첫 IMU 샘플을 bias로 캡처하고 이후 `roll/pitch - startup_bias`를 사용하도록 변경. `stand_pd_sanity`에서는 이 영점 보정을 켜서 `tilt_r/tilt_p`가 0 근처로 내려오는지 먼저 확인하기로 함
 - `stand_pd_sanity`의 `current pose hold`를 버리고, IsaacLab `G1_CFG.init_state.joint_pos`를 `joint_order_g1.yaml` 순서에 맞춘 full-length `stand_q_ref` seed로 고정. helper `scripts/sim2real/generate_g1_stand_qref.py` 추가
 - graph_builder의 IMU source를 `robot_prim=/pelvis` 고정에서 분리. `imu_prim` 자동탐색(`imu_link -> torso_link -> pelvis`)과 `frame_ids.imu=auto`를 추가해 `/rb/imu`가 실제 source prim 이름과 맞는 frame_id를 사용하도록 조정
-- `joint sign`을 육안 대신 숫자로 확인하기 위한 최소 audit 경로 추가: `joint_sign_audit.yaml` + `ops/tmuxp/joint_sign_audit.yaml` + `scripts/sim2real/joint_state_delta.py`. 단일 joint에 작은 `step_effort`를 주고 `js_before/js_after`에서 `delta` 부호를 계산하도록 정리
+- `joint sign`을 육안 대신 숫자로 확인하기 위한 최소 audit 경로 추가: `joint_sign_audit.yaml` + `ops/tmuxp/legacy/joint_sign_audit.yaml` + `scripts/sim2real/joint_state_delta.py`. 단일 joint에 작은 `step_effort`를 주고 `js_before/js_after`에서 `delta` 부호를 계산하도록 정리
 - 하체 6개 sign audit 재확인 결과 hip/knee/ankle pitch는 모두 `+ command -> + delta`, `- command -> - delta`로 1차 통과. 다음 단계로 `stand_pd_sanity`에서 `enable_tilt_feedback=true`를 다시 켜고 standing time 변화 확인
 - pose audit 결과 `IsaacLab G1` seed pose가 팔 전방/상대적 crouch로 인해 free-stand 시 항상 앞으로 붕괴하는 패턴으로 해석됨. `standing q_ref v2`로 hip/knee/ankle crouch를 줄이고 팔을 내린 nominal pose로 보정
 - `m5_stand`에서는 controller target뿐 아니라 Isaac direct spawn 초기 pose도 같은 `stand_qref_g1_seed.yaml`를 사용하도록 변경. 이제 시작 pose와 `stand_q_ref` seed가 일치한 상태에서 stand sanity를 볼 수 있음
@@ -200,7 +209,7 @@
 - `M7` safety 재통합용 경로를 분리했다. `stand_pd_safecheck.yaml`은 현재 standing baseline에 `safety_enabled=true`, `effort_abs_max_default=18.0`, `tilt_limit=0.6rad`, `velocity_limit(default/ankle)=8/12rad/s`를 얹은 전용 시나리오이고, `ops/tmuxp/m7_stand_safecheck.yaml`은 headless 60초 관측창 동안 `reason_count/sync_markers/loop_post_sync/loop_before_fall`를 자동 수집한다.
 - `VIDEO_CAPTURE_GUIDE.md`도 현재 milestone 체계로 다시 맞췄다. 예전 `M5 disturbance hook` 중심 구조를 버리고, `M5 standing hold -> M7 safety-on -> M8 disturbance A/B -> M9 KPI` 순서로 어떤 장면을 찍고 어떻게 편집할지 기준을 다시 정리했다.
 - `M7` safecheck 캡처 기준도 조정했다. `m7_stand_safecheck.yaml`은 이제 `FIRST_SIM_STEP`가 아니라 controller 로그의 `[SYNC] CONTROL_ACTIVE`를 관측창 시작점으로 삼아, “sim이 시작된 뒤 60초”가 아니라 “실제 제어가 붙은 뒤 60초”를 기준으로 safety-on standing을 해석한다.
-- `M4` safety 증빙도 보강한다. `velocity.yaml` + `ops/tmuxp/m4_velocity.yaml`을 추가해 팔 관절 하나를 빠르게 움직이는 전용 시나리오로 `reason=VELOCITY_LIMIT`를 재현하고, `reasons.txt`와 `loop_tail.txt`를 기존 M4 reason과 같은 방식으로 수집한다.
+- `M4` safety 증빙도 보강한다. `velocity.yaml` + `ops/tmuxp/legacy/m4_velocity.yaml`을 추가해 팔 관절 하나를 빠르게 움직이는 전용 시나리오로 `reason=VELOCITY_LIMIT`를 재현하고, `reasons.txt`와 `loop_tail.txt`를 기존 M4 reason과 같은 방식으로 수집한다.
 - `M7`은 safety-on standing 기준으로 사실상 통과했다. `logs/sim2real/_legacy/20260314-133954_m7_stand_safecheck/m7/`에서 `CONTROL_ACTIVE` 이후 60초 동안 `[NO_FALL_EVENT]`, `[NO_SAFETY_REASON]`를 확인했고, 이에 맞춰 `README/overview/ONE_PAGER/VIDEO_CAPTURE_GUIDE`를 M8 진입 전 상태로 다시 동기화했다.
 - `MASTER_PLAN.md`와 `overview.md`의 M5 설명도 보강했다. 현재 standing controller는 raw joint/IMU direct feedback 기반의 경량 bring-up 구조이며, estimator 분리는 후속 milestone(M10)에서 진행한다는 점을 명시해 “왜 estimator가 아직 별도 노드가 아닌가”를 문서에서 바로 설명할 수 있게 했다.
 - `M8` 비교 경로도 시작했다. `m8_disturb` phase에 torso 단일 force pulse 훅(`DISTURBANCE_START/END`)을 추가하고, `stand_pd_balance_off.yaml`(tilt/balance feedback off) / `stand_pd_balance_on.yaml`(현재 baseline) / `ops/tmuxp/m8_disturb.yaml`을 만들어 같은 외란에서 balance feedback OFF/ON을 같은 방식으로 수집할 수 있게 정리했다.
@@ -212,7 +221,7 @@
 - `90N x 0.10s`에서도 `balance_off`와 `balance_on`이 모두 no-fall이면, M8 목표는 이제 `OFF만 fall / ON은 no-fall`인 경계값을 찾는 것으로 본다. force만 올리는 단일 변수 탐색 원칙에 따라 다음 기본 disturbance는 `120N x 0.10s`로 조정한다.
 - `120N x 0.10s`, `110N x 0.10s`, `100N x 0.10s` 탐색과 `is_global=false` 전환만으로는 여전히 `roll` 우세 응답이 남았다. 그래서 M8 외란 입력을 observer와 같은 control frame으로 맞추기 위해 `disturbance.frame_mode=g1_imu_link`를 도입했고, `configured_force_xyz`와 실제 torso local `applied_force_xyz`를 로그에 함께 남기도록 정리했다.
 - 위 frame alignment 이후에는 `balance_off`는 no-fall인데 `balance_on`만 과민하게 반응해 fall하는 패턴이 확인됐다. 이에 따라 `stand_pd_balance_on.yaml`에서 `tilt_qref_bias_abs_max: 0.15 -> 0.08`, `tilt_kp_pitch: 20 -> 12`, `stand_kp: 60 -> 50`, `stand_kd: 4 -> 3.5`로 완화했고, 현재 M8은 `OFF/ON` 모두 no-fall이지만 `ON`의 roll 응답이 여전히 큰 상태라 disturbance 대응용 balance tuning을 계속 진행한다.
-- M8 비교군 정의도 다시 바로잡는다. 이제 `stand_pd_balance_base.yaml` 1개를 공통 baseline으로 두고, `ops/run_m8_pair.sh` + `controller.launch.py`가 `enable_tilt_feedback_override=true/false`만 런타임에서 넘긴다. 즉 이후 M8의 OFF/ON 차이는 정말 balance feedback 유무만 의미하고, 매 run마다 별도 YAML을 생성하지 않는다.
+- M8 비교군 정의도 다시 native 기준으로 바로잡았다. 이제 `ops/run_m8_pair.sh`는 공통 controller baseline `rb_bringup/config/standing_controller_baseline.yaml`과 M8 stack profile `rb_bringup/config/m8_stack_disturb.yaml`을 그대로 쓰고, launch override로 `enable_tilt_feedback`만 `false/true` 바꾼다. 즉 이후 M8의 OFF/ON 차이는 정말 native standing plugin의 `enable_tilt_feedback` 유무만 의미한다.
 - 위 공정 비교에서도 `balance_on`이 `balance_off`보다 더 크게 흔들리는 것이 확인돼, 현재 M8은 구조/좌표계 문제가 아니라 disturbance-response gain tuning 단계로 본다. 이에 따라 공통 base에서 `tilt_qref_bias_abs_max: 0.08 -> 0.04`, `tilt_kp_roll/kd_roll: 4.0/0.8 -> 2.0/0.4`, `tilt_kp_pitch/kd_pitch: 12.0/2.0 -> 8.0/1.2`로 다시 보수화해 ON feedback의 과민 응답을 줄이는 방향으로 진행한다.
 - 이후 `113N`에서 `OFF fall / ON survive`가 한 번 나오고, `115N`에서는 `ON`도 더 늦게 넘어지며 peak tilt를 줄이는 패턴이 확인됐다. 다만 반복 3회 기준 재현성이 아직 부족해, 현재는 roll gain은 유지한 채 `tilt_qref_bias_abs_max: 0.04 -> 0.05`, `tilt_kp_pitch/kd_pitch: 8.0/1.2 -> 9.0/1.4`로 `pitch authority`만 소폭 보강해 113N 재현성과 115N margin을 조금 더 확보하는 쪽으로 진행한다.
 - 최근 `115N` 런에서는 `balance_on`이 `balance_off`보다 훨씬 늦게 넘어지고 peak tilt도 더 작았지만, `loop_after_disturb`에서 `u_pitch=0.050` 상한에 계속 걸리는 패턴이 확인됐다. 현재 bottleneck은 gain 부족보다 `pitch qref bias cap`에 가까우므로, `tilt_qref_bias_abs_max: 0.05 -> 0.06`으로 상한만 소폭 열어 `115N` margin을 더 확보하는 쪽으로 조정한다.
@@ -257,3 +266,92 @@
 - M9 후처리 스크립트 안정화도 같이 했다. `ops/run_m9_kpi.sh`는 모듈 실행(`python3 -m ...`)으로 바꿔 import 경로 문제를 없앴고, `scripts/sim2real/kpi/writers.py`는 optional config 값이 `None`일 때도 `summary.md`를 정상 생성하도록 보강했다.
 - 포트폴리오용 기존 M8/M9 결론(`같은 disturbance에서 OFF fall / ON survive`가 관측된 대표 baseline이 존재한다)은 유지한다. 이번 bias 제거 런은 성능 결론을 다시 덮어쓰는 실험이 아니라, estimator contract 단순화 이후에도 standing/disturbance/KPI 파이프라인이 여전히 정상 동작하는지 보는 회귀 확인으로 취급한다.
 - 다음 초점은 M10이다. 현재 estimator 분리 자체는 끝났고, 다음 단계는 `EstimatedState`를 더 명확한 제어용 상태 계약으로 다듬고, 그 상태를 controller/safety가 더 일관되게 쓰게 만드는 쪽이다.
+
+### 2026-03-26 추가 정리 — M10 1차 완료
+- `rb_controller/msg/EstimatedState.msg`에 `joint_state_stamp`, `imu_stamp`, `joint_state_valid`, `imu_valid`를 추가했다. 이제 `/rb/estimated_state`는 값만 담는 메시지가 아니라, source freshness와 validity도 같이 담는 제어 계약이 됐다.
+- `rb_controller`의 build 인터페이스도 같이 정리했다. `package.xml`, `CMakeLists.txt`에 `builtin_interfaces` 의존성을 추가해 새 message 필드가 정상적으로 생성되도록 맞췄다.
+- `estimator_node.cpp`는 source stamp cache와 `input_stale_timeout_sec` 기반 stale 판정을 추가해, joint/imu가 오래된 경우 `joint_state_valid`, `imu_valid`를 false로 publish하도록 바꿨다.
+- `controller_node.cpp`는 valid joint/imu가 들어오기 전까지 실제 standing control을 시작하지 않도록 정리했다. 지금 `[SYNC] CONTROL_ACTIVE`는 사실상 "estimated_state 준비 완료" marker 역할을 한다.
+- `safety_node.cpp`도 same contract를 쓰게 맞췄다. 현재 safety는 `imu_valid=false`인 상태를 tilt safety 판단에 쓰지 않는다.
+- M10 1차 스모크도 통과했다. build 후 `ros2 interface show rb_controller/msg/EstimatedState`에서 새 필드가 보이는 것, `m7_stand_safecheck`에서 `CONTROL_ACTIVE / NO_SAFETY_REASON / NO_FALL_EVENT`가 유지되는 것을 확인했다.
+- 복습 문서도 이번 구조에 맞춰 정리했다. `docs/review/m10/00_index.md`, `01_contract.md`, `02_file_changes.md`, `03_smoke_check.md`를 기준으로 `msg -> estimator -> controller -> safety` 순서로 복습할 수 있게 했다.
+- 현재 판단: M10 1차 범위는 완료로 본다. 다음은 `ros2_control` 구조 전환을 다루는 M10.5다.
+
+### 2026-03-26 추가 정리 — M10.5 Step 1 시작 (ros2_control 골격 추가)
+- `rb_bringup`은 더 이상 단순 config 폴더가 아니다. `package.xml`, `CMakeLists.txt`를 추가해 실제 ROS 패키지로 승격했고, `launch / config / urdf`를 install space 기준으로 배포할 수 있게 정리했다.
+- `ros2_control` 최소 bringup을 추가했다. `rb_bringup/launch/ros2_control.launch.py`는 control-only xacro를 읽어 `controller_manager(ros2_control_node)`, `robot_state_publisher`, 필요 시 `joint_state_broadcaster spawner`를 띄운다. `start_joint_state_broadcaster` 스위치도 넣어 broadcaster 없이 manager/hardware만 따로 점검할 수 있게 했다.
+- `rb_bringup/config/standing_controller_baseline.yaml`도 추가했다. Step 1에서는 `joint_state_broadcaster`만 선언했지만, Step 2 시작과 함께 write path 점검용 표준 controller `rb_effort_forward_controller`를 추가했다. 이후에는 `rb_standing_controller` custom plugin까지 추가해 native controller 경로도 같이 검증할 수 있게 했다.
+- `rb_bringup/urdf/g1_ros2_control.xacro`도 만들었다. 처음에는 dummy tree placeholder였지만, 이후 Isaac Script Editor에서 `g1_stage.usd`를 연 상태로 joint dump를 뽑아 실제 구조 기반으로 다시 썼다. 현재 xacro는 full URDF는 아니지만 `pelvis` root 기준 `43`개 joint tree(`37` movable + `6` fixed), parent-child, joint type, axis, limit을 반영한 control-only description이다. visual/collision mesh는 넣지 않고, `bridge_enabled`, `joint_state_topic`, `command_topic`을 launch arg로 주입할 수 있게 했다.
+- 새 패키지 `rb_hardware_interface`를 추가했다. 현재 구현체 이름은 `RBHardwareSystem`이며, `hardware_interface::SystemInterface`를 상속하는 skeleton이다. 현재는 `effort` command와 `position/velocity/effort` state interface를 export하는 최소 드라이버 골격을 구현했다. Step 2부터는 launch에서 `bridge_enabled=true`를 주면 `/rb/joint_states`를 읽고 `command_topic`으로 effort 명령을 쓰는 초기 topic bridge 경로도 함께 올라간다.
+- 중요한 점: 이번 Step 1은 direct apply 경로를 아직 제거하지 않는다. 현재 Isaac graph의 `/rb/command_safe -> articulation apply` 경로는 그대로 두고, 그 옆에 `ros2_control` 골격을 새로 세운 단계다.
+- build/launch 검증도 했다. `colcon build --packages-select rb_bringup rb_hardware_interface rb_controller` 통과, xacro generate 통과, `ros2 launch rb_bringup ros2_control.launch.py start_joint_state_broadcaster:=false`에서 `controller_manager`가 `G1ControlOnlySystem` hardware를 `load -> init -> configure -> activate`하는 것과 `/controller_manager/*` 서비스 목록, `ros2 control list_hardware_interfaces` 기준 37개 effort/state interface 노출을 확인했다. 구조를 실제 joint tree로 바꾼 뒤에도 skeleton launch가 그대로 살아 있다는 점을 재확인했다.
+- 이후 원인 분리도 했다. `list_controller_types`는 정상이었지만 `load_controller`가 멈춰 broadcaster 전용 문제가 아니라 controller loading 경로 전체 문제로 좁혔다. 다시 테스트한 결과 `controller_manager_use_sim_time=false`에서는 `joint_state_broadcaster`가 `load -> configure -> activate`까지 즉시 성공했고, `controller_manager_use_sim_time=true`에서는 `/clock`이 없을 때 timeout, 가짜 `/clock`을 넣으면 빠르게 실패하는 쪽으로 증상이 바뀌었다. 즉 “Isaac이 안 떠서 /clock이 없어서만 멈춘다”가 아니라, 현재 Humble 조합에서 controller_manager의 sim time 경로가 불안정한 상태로 본다.
+- 그래서 launch를 정리했다. `use_sim_time`은 주변 sim 노드용으로 유지하되, `controller_manager_use_sim_time`을 별도 arg로 분리하고 기본값을 `false`로 뒀다. 현재 Step 1 기본 bringup은 이 설정에서 정상 통과한다.
+- Step 2 초기 연결도 시작했다. `bridge_enabled:=true`, `command_topic:=/rb/command_raw`, `start_effort_forward_controller:=true`로 launch했을 때 `RBHardwareSystem configured: subscribed=/rb/joint_states published=/rb/command_raw`와 `Loaded/Configured and activated rb_effort_forward_controller`까지 확인했다. 즉 ros2_control skeleton이 이제 기존 Isaac direct-apply graph의 `/rb/command_raw -> articulation` 경로 앞단에 붙을 준비가 된 상태다.
+- `/rb_effort_forward_controller/commands`에 effort 배열을 보냈을 때 `/rb/command_raw --once`에서 같은 effort 배열이 실제로 찍히는 것도 확인했다. 즉 ros2_control write path는 확인됐고, 다음 확인 대상은 이후 `m3_command` phase의 `/rb/command_raw -> articulation` apply 구간이다.
+- standing 재현용 active 세션은 이제 [m5_stand.yaml](/home/leemou/Projects/RB_Humanoid_Control/ops/tmuxp/m5_stand.yaml)와 [m7_stand_safecheck.yaml](/home/leemou/Projects/RB_Humanoid_Control/ops/tmuxp/m7_stand_safecheck.yaml)다. 둘 다 `m5_stand` scene 위에 native plugin path를 띄우고, relaxed/safety-on만 나눠서 본다.
+- bridge-only standing smoke는 실제로 통과했다. `m5_stand` standing scene에서 effort test 후 **왼팔이 뒤로 움직이는 것**을 확인했고, 최소 `ros2_control -> /rb/command_safe -> Isaac apply` 경로는 검증됐다.
+- 다만 여기까지는 어디까지나 **bridge-only smoke**다. 기존 `rb_controller -> rb_safety` 제어 출력이 ros2_control을 거쳐 apply되도록 완전히 옮긴 것은 아직 아니다.
+- 그래서 `rb_controller/src/command_bridge_node.cpp`를 추가했다. 이 노드는 `rb_safety`가 내는 `sensor_msgs/msg/JointState` effort 명령을 받아 `std_msgs/msg/Float64MultiArray`로 바꿔 `/rb_effort_forward_controller/commands`로 넘긴다.
+- `rb_controller/launch/controller.launch.py`에도 `enable_command_bridge`, `command_bridge_input_topic`, `command_bridge_output_topic`, `ros2_control_controllers_file` 인자를 추가했다. 이 모드에서는 `rb_safety` 출력이 `/rb/command_safe_source` 같은 중간 토픽으로 나가고, `rb_command_bridge`가 그 값을 ros2_control forward controller 입력으로 넘긴다.
+- 위 active stand 세션들은 `m5_stand + ros2_control + native_stack` 조합으로 통일했다. 즉 이제 stand smoke는 `rb_estimator -> rb_standing_controller -> RBHardwareSystem -> rb_safety -> Isaac` 경로만 본다.
+- standing smoke tmuxp는 이제 full-stack path 확인만 남긴다. 즉 `rb_controller -> rb_safety -> rb_command_bridge -> rb_effort_forward_controller -> /rb/command_safe -> Isaac` 경로가 실제로 살아 있는지만 로그로 확인한다.
+- 현재 launch에서 보이는 `FIFO RT scheduling`, `getifaddrs`, root inertia 관련 경고는 Step 1 실패가 아니라 환경/description 제약이다.
+- 복습 문서도 같이 추가했다. `docs/review/m10_5/00_index.md`, `01_contract.md`, `02_file_changes.md`, `03_smoke_check.md`를 기준으로 이번 단계에서 무엇을 만들었고 아직 무엇을 안 했는지 바로 따라갈 수 있게 정리했다.
+- 이후 full-stack smoke에서도 `command_safe_source -> effort_controller -> command_safe` 세 hop이 실제로 살아 있는 것을 로그로 확인했다. 즉 현재 repo는 `custom -> adapter -> ros2_control -> Isaac` 전환형 구조까지는 검증된 상태다.
+- 다만 이건 최종 목표 구조는 아니다. 지금 남아 있는 active path에는 아직 `rb_command_bridge`, `rb_effort_forward_controller`가 있고, standing 제어 수학 자체는 `controller_node.cpp` 일반 ROS 노드에 남아 있다.
+- 따라서 현재 판정은 이렇게 잡는다.
+  - 완료: `ros2_control` 전환형 구조 검증
+  - 완료: `rb_standing_controller` native ros2_control controller plugin + stand_pd 핵심 계산 이식
+  - 미완료: active path 교체
+- 이 차이를 헷갈리지 않도록 `docs/review/m10_5/04_ros2_control_study.md`를 추가해, 현재 구조와 최종 목표 구조를 초보자 기준으로 다시 설명했다.
+
+### 2026-03-27 추가 정리 — native standing controller 추가
+- 새 패키지 `rb_standing_controller`를 추가했다. 이 패키지는 `controller_interface::ControllerInterface` 기반 custom controller plugin 자리다.
+- 현재 구현체 이름은 `RBStandingController`다. 이제는 zero-effort skeleton이 아니라, `joints`, `command_interface_name`, `state_interface_names`를 기준으로 `37`개 effort/state interface를 claim하고 stand_pd 핵심 계산을 직접 수행한다.
+- `rb_bringup/config/standing_controller_baseline.yaml`에 `rb_standing_controller` 항목을 추가했다. 현재는 기존 `rb_effort_forward_controller`와 별도로, `start_standing_controller:=true`일 때만 custom controller를 스폰한다.
+- `rb_bringup/launch/ros2_control.launch.py`에도 `start_standing_controller` 인자를 추가했다. 현재는 `rb_effort_forward_controller`와 같은 effort command interface를 claim하므로 둘을 동시에 켜지 않는다.
+- build 검증도 했다. `colcon build --packages-select rb_standing_controller rb_bringup rb_hardware_interface rb_controller` 통과.
+- bringup 검증도 했다. `ROS_LOG_DIR=/tmp/ros_logs ros2 launch rb_bringup ros2_control.launch.py start_standing_controller:=true start_effort_forward_controller:=false start_joint_state_broadcaster:=true bridge_enabled:=false`에서 아래가 실제로 확인됐다.
+  - `Loaded rb_standing_controller`
+  - `rb_standing_controller configured: joints=37 estimated_state_topic=/rb/estimated_state stand_kp=6.00 stand_kd=8.00 limit=1.40`
+  - `rb_standing_controller activate successful: native stand_pd plugin is now driving effort interfaces`
+  - `stand_q_ref size mismatch: ref=1 joint_count=37. fallback to current pose=enabled`
+  - `native stand_pd reference ready: source=current_pose count=37`
+  - `Configured and activated rb_standing_controller`
+- 현재 판정:
+  - 완료: native custom controller plugin 생성 + build + load/configure/activate 검증
+  - 완료: 기존 `controller_node.cpp`의 stand_pd 핵심 계산을 `RBStandingController` 안으로 이식
+  - 미완료: active path에서 `rb_command_bridge`, `rb_effort_forward_controller`를 제거하는 것
+
+### 2026-03-27 추가 정리 — native plugin active-path smoke
+- `RBStandingController` 코드의 비자명한 경계에 한국어 주석을 더 보강했다. 특히 `EstimatedStateInput`, `TiltFeedbackCommand`, `on_configure()`의 parameter snapshot 의도, `update()`의 `effective_q_ref` 사용 이유를 바로 읽히게 적었다.
+- native active-path smoke를 별도로 실행했다. 조합은 아래 셋이다.
+  - `python main.py --phase m5_stand --steps 1200 --headless`
+  - `ros2 launch rb_bringup ros2_control.launch.py bridge_enabled:=true command_topic:=/rb/command_raw start_effort_forward_controller:=false start_standing_controller:=true`
+  - `ros2 launch rb_controller controller.launch.py params_file:=.../stand_pd_safecheck.yaml start_controller:=false enable_command_bridge:=false`
+- 로그는 `logs/sim2real/m10_5/smoke_20260327_native_plugin/`에 남겼다.
+- 실제 관찰 결과:
+  - `ros2_control_native.log` 기준 `rb_standing_controller`는 `load -> configure -> activate` 됐다.
+  - `command_raw_once.txt`에는 nonzero leg effort가 찍혔다. 즉 native plugin이 실제로 `RBHardwareSystem.write(/rb/command_raw)`까지 명령을 만들었다.
+  - `command_safe_once.txt`는 전부 `0.0`이었다. 이건 native path 실패가 아니라, `controller_native.log`에서 보이듯 `rb_safety`가 `TILT/TIMEOUT` 이유로 `/rb/command_safe`를 zeroing한 결과다.
+- 현재 권장 active path는 이렇게 읽는다.
+  - `rb_estimator -> RBStandingController -> RBHardwareSystem.write(/rb/command_raw) -> rb_safety -> /rb/command_safe -> Isaac`
+- 따라서 현재 판정은 이렇게 갱신한다.
+  - 완료: legacy bridge path 검증
+  - 완료: native plugin path 검증
+  - 남은 것: `rb_safety`를 외부 supervisor로 유지할지, 일부를 plugin 내부로 옮길지에 대한 구조 선택
+
+### 2026-03-27 추가 정리 — native plugin을 기본 active path로 전환
+- 기본 launch도 이제 native plugin 기준으로 뒤집었다.
+- `rb_bringup/launch/ros2_control.launch.py`는 기본값이 `start_standing_controller=true`, `bridge_enabled=true`다. 즉 ros2_control bringup을 그냥 띄우면 `rb_standing_controller`가 기본으로 올라간다.
+- `rb_bringup/launch/native_stack.launch.py`를 새로 추가했다. 이 launch는 active native path에서 `rb_estimator + rb_safety`만 올리고, 기본 YAML도 `rb_bringup/config/m7_stack_safety_on.yaml`을 쓴다.
+- `rb_controller/launch/controller.launch.py`는 legacy fallback launch로만 남긴다. 기본값이 `start_controller=false`, `enable_command_bridge=false`인 이유도 이제 "active path가 아니라 legacy replay/fallback 용도"이기 때문이다.
+- `ops/tmuxp`도 active/native와 legacy를 분리했다. 현재 루트에는 `m1_sensor`, `m5_pose_audit`, `m5_stand`, `m7_stand_safecheck`, `m8_disturb`만 남기고, pre-native controller-node 전용 세션은 `ops/tmuxp/legacy/`로 이동했다.
+- native smoke 기본값도 정리했다. `m7_stack_safety_on.yaml`은 safety-on 기준(`tilt_limit_roll/pitch_rad=0.6`), `m5_stack_relaxed.yaml`은 debug 기준(`tilt_limit_roll/pitch_rad=1.2`)으로 나눴고, active tmux는 controller/plugin 활성화 후 시점의 `/rb/command_raw`, `/rb/command_safe`를 다시 캡처하도록 바꿨다.
+- native smoke 재검증(`20260327-131710`, `20260327-132027`)에서는 `rb_standing_controller`가 `/rb/command_raw`에 nonzero effort를 쓰고도 `rb_safety`가 `reason=TILT axis=ROLL`로 `/rb/command_safe`를 zeroing했다. GUI 관찰상 실제 붕괴는 전방(sagittal)인데 roll 채널이 커졌으므로, 원인을 native plugin이 아니라 `rb_estimation/controller_tilt_observer.cpp`의 고정 swap 매핑으로 판단했다.
+- 이후 legacy와 native가 둘 다 다시 못 서는 것을 확인했고, 원인이 ros2_control이 아니라 estimator의 IMU frame compensation을 중간에 풀어버린 데 있다는 점을 확인했다. 최종적으로는 G1 IMU raw frame -> control frame 보정을 다시 유지했다. 즉 현재 `controller_tilt_observer.cpp`는 `tilt_roll <- raw_pitch`, `tilt_pitch <- raw_roll`, `roll_rate <- gyro.y`, `pitch_rate <- gyro.x`를 사용해 control-frame standard roll/pitch를 publish한다.
+- 위 수정 후 `20260327-142224_m10_5_native_stack`에서는 같은 forward fall이 이제 `reason=TILT axis=PITCH`로 잡혔다. 즉 native path에서 남은 문제는 더 이상 tilt 축 해석이 아니라, standing controller baseline 자체가 아직 약한 쪽이라는 뜻이다.
+- 그래서 native 기본 controller 설정도 legacy에서 safety-on으로 서 있던 `M7 safecheck` baseline으로 올렸다. `rb_standing_controller`는 이제 `stand_kp/kd=60/4`, `stand_effort_abs_max=18`, `stand_hold_current_on_start=false`, 검증된 `stand_q_ref`, 관절군별 gain scale, `tilt_apply_mode=qref_bias`, `stand_tilt_cut_enable=false`를 기본으로 사용한다. `rb_safety`도 같은 baseline에 맞춰 `effort_abs_max_default=18`, `tilt_limit_roll/pitch_rad=0.6`로 되돌렸다.
+- 그 다음 `20260327-142746_m10_5_native_stack`에서는 robot이 뒤로 붕괴했다. 이 로그를 보면 pitch 축 해석은 계속 정상(`axis=PITCH pitch=-0.605`)이지만, 이번에는 native plugin의 `joints:` 순서와 `stand_q_ref` source-of-truth 순서가 달랐다. 즉 native controller가 검증된 `stand_q_ref` 값을 잘못된 관절에 대입하고 있었다.
+- 그래서 `rb_bringup/config/standing_controller_baseline.yaml`의 `rb_standing_controller.joints`와 `rb_effort_forward_controller.joints`를 모두 `joint_order_g1.yaml` 순서로 통일했다. 현재 native plugin은 이제 `stand_qref_g1_seed.yaml`와 같은 순서 기준으로 reference/command를 해석한다.

@@ -155,7 +155,7 @@ sim2real:
     stop_on_fall_event: false
     progress_log_interval_sec: 10.0
     disable_fabric: false
-    reset_on_done: true
+    reset_on_done: false
     sim_dt: 0.005
     decimation: 1
     substeps: 1
@@ -175,12 +175,12 @@ sim2real:
       torso_body_name_candidates: [torso_link, torso, base_link]
     disturbance:
       enabled: true
-      start_elapsed_sec: 5.0
-      start_after_control_active_sec: 3.0
+      start_elapsed_sec: 3.0
+      start_after_control_active_sec: 1.0
       duration_sec: 0.10
       body_name_candidates: [torso_link, torso, base_link]
       frame_mode: g1_imu_link
-      force_xyz: [115.0, 0.0, 0.0]
+      force_xyz: [128.0, 0.0, 0.0]
       torque_xyz: [0.0, 0.0, 0.0]
       is_global: false
     enable_ros2_bridge: true

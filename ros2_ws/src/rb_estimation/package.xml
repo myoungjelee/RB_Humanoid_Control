@@ -1,19 +1,20 @@
 <?xml version="1.0"?>
 <?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
 <package format="3">
-  <name>rb_controller</name>
+  <name>rb_estimation</name>
   <version>0.1.0</version>
-  <description>RB 휴머노이드 legacy controller 및 fallback bridge 패키지</description>
+  <description>RB 휴머노이드 상태 추정 노드 패키지</description>
   <maintainer email="mjzizou@naver.com">leemou</maintainer>
   <license>Apache-2.0</license>
 
   <buildtool_depend>ament_cmake</buildtool_depend>
 
+  <depend>builtin_interfaces</depend>
   <depend>rb_interfaces</depend>
   <depend>rcl_interfaces</depend>
   <depend>rclcpp</depend>
   <depend>sensor_msgs</depend>
-  <depend>std_msgs</depend>
+
   <exec_depend>launch</exec_depend>
   <exec_depend>launch_ros</exec_depend>
 

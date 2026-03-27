@@ -1,0 +1,10 @@
+<library path="rb_hardware_interface">
+  <class
+    name="rb_hardware_interface/RBHardwareSystem"
+    type="rb_hardware_interface::RBHardwareSystem"
+    base_class_type="hardware_interface::SystemInterface">
+    <description>
+      Control-only ros2_control hardware interface skeleton for RB Humanoid.
+    </description>
+  </class>
+</library>
