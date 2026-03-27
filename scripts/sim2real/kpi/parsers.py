@@ -6,6 +6,8 @@ import re
 from pathlib import Path
 from typing import Any
 
+import yaml
+
 
 def read_text(path: Path) -> str:
     if not path.exists():
@@ -139,6 +141,10 @@ def parse_sync_markers(path: Path) -> dict[str, Any]:
 
 def parse_start(path: Path) -> dict[str, Any]:
     text = read_text(path)
+    if not text:
+        # 현재 active M8 경로는 별도 start.txt를 만들지 않고,
+        # ros2_control.log의 configure 로그에 핵심 stand/tilt 파라미터를 남긴다.
+        text = read_text(path.parent / "ros2_control.log")
     result: dict[str, Any] = {
         "enable_tilt_feedback": None,
         "stand_kp": None,
@@ -178,6 +184,27 @@ def parse_start(path: Path) -> dict[str, Any]:
         result["tilt_qref_bias_abs_max"] = float(tilt_match.group(8))
         result["tilt_weight_roll_raw"] = tilt_match.group(9)
         result["tilt_weight_pitch_raw"] = tilt_match.group(10)
+        return result
+
+    native_match = re.search(
+        r"rb_standing_controller configured: .*stand_kp=([0-9.]+)\s+stand_kd=([0-9.]+)\s+limit=([0-9.]+)\s+"
+        r"enable_tilt_feedback=(true|false)\s+tilt_mode=([^\s]+)\s+"
+        r"tilt_kp_roll=([0-9.]+)\s+tilt_kd_roll=([0-9.]+)\s+"
+        r"tilt_kp_pitch=([0-9.]+)\s+tilt_kd_pitch=([0-9.]+)\s+"
+        r"tilt_qref_bias_abs_max=([0-9.]+)",
+        text,
+    )
+    if native_match:
+        result["stand_kp"] = float(native_match.group(1))
+        result["stand_kd"] = float(native_match.group(2))
+        result["stand_limit"] = float(native_match.group(3))
+        result["enable_tilt_feedback"] = native_match.group(4) == "true"
+        result["tilt_apply_mode"] = native_match.group(5)
+        result["tilt_kp_roll"] = float(native_match.group(6))
+        result["tilt_kd_roll"] = float(native_match.group(7))
+        result["tilt_kp_pitch"] = float(native_match.group(8))
+        result["tilt_kd_pitch"] = float(native_match.group(9))
+        result["tilt_qref_bias_abs_max"] = float(native_match.group(10))
 
     return result
 
@@ -205,21 +232,31 @@ def parse_loop_stats(path: Path) -> dict[str, Any]:
 
 
 def load_trim_hint() -> dict[str, Any]:
-    scenario_path = (
+    baseline_path = (
         Path(__file__).resolve().parents[3]
         / "ros2_ws"
         / "src"
-        / "rb_controller"
+        / "rb_bringup"
         / "config"
-        / "scenarios"
-        / "stand_pd_balance_base.yaml"
+        / "standing_controller_baseline.yaml"
     )
-    text = read_text(scenario_path)
-    match = re.search(r"stand_q_ref_trim:\s*\[(.*?)\]", text, re.DOTALL)
-    if not match:
+    text = read_text(baseline_path)
+    if not text:
         return {"stand_q_ref_trim_hint": None}
 
-    raw_values = [chunk.strip() for chunk in match.group(1).replace("\n", " ").split(",") if chunk.strip()]
+    try:
+        data = yaml.safe_load(text) or {}
+        raw_values = (
+            data.get("rb_standing_controller", {})
+            .get("ros__parameters", {})
+            .get("stand_q_ref_trim", [])
+        )
+    except yaml.YAMLError:
+        return {"stand_q_ref_trim_hint": None}
+
+    if not isinstance(raw_values, list):
+        return {"stand_q_ref_trim_hint": None}
+
     try:
         values = [float(value) for value in raw_values]
     except ValueError:

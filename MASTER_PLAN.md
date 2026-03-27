@@ -231,8 +231,15 @@ controller를 바로 actuator에 연결하지 않고
 
 no-disturbance standing을 확보한다.
 
-현재 M5의 standing controller는 raw joint/IMU feedback를 직접 사용하는 경량 bring-up 구조이며,
-state estimator 분리는 후속 milestone(M10)에서 진행한다.
+현재 M5의 standing baseline은 이후 `M7 ~ M9`까지 공통으로 재사용하는
+standing controller 기준점이다.
+
+active 실행 경로는 현재
+
+`rb_estimation -> rb_standing_controller -> rb_hardware_interface -> rb_safety`
+
+구조를 기준으로 정리되어 있으며,
+후속 milestone에서는 이 경로를 유지한 채 calibration / metrics / control 확장을 진행한다.
 
 핵심 작업
 
@@ -401,11 +408,29 @@ run 결과를 자동 요약하고 run 간 비교 가능한 형태로 만든다.
 
 ---
 
-# M10 — Estimator / Observer 고도화
+# M10 — Estimator / Observer 고도화 + Native Control Stack 고정
 
 목표
 
-센서 해석을 controller와 더 명확히 분리한다.
+센서 해석 / 제어 실행 / 하드웨어 경계를 명확히 고정하고,
+그 위에서 estimator / observer를 고도화한다.
+
+정리 대상
+
+- `rb_estimation`
+- `rb_standing_controller`
+- `rb_hardware_interface`
+- `rb_safety`
+
+active path
+
+`rb_estimation -> rb_standing_controller -> rb_hardware_interface -> rb_safety`
+
+의도
+
+- 이후 `M11+` milestone이 legacy controller 경로가 아니라
+  native `ros2_control` 실행 경로를 기준으로 진행되게 만든다.
+- `rb_controller`는 active runtime에서 제거하고 legacy/archive로 내린다.
 
 구성
 
@@ -566,21 +591,19 @@ Sensors
 
 ---
 
-현재 단계에서는 runtime 변수를 늘리지 않기 위해
+현재 active runtime 구조는 아래와 같다.
 
-`rb_controller` 내부 모듈 분리
+- `rb_interfaces`
+- `rb_bringup`
+- `rb_estimation`
+- `rb_standing_controller`
+- `rb_hardware_interface`
+- `rb_safety`
 
-만 먼저 진행한다.
+즉 패키지 분리 자체는 이미 진행되었고,
+이후 milestone은 이 native `ros2_control` 경로 위에서 확장한다.
 
-즉 현재는
-
-- stand core
-- tilt observer
-- debug logger
-
-를 한 노드 안에서 분리한다.
-
-최종적으로는 다음 ROS 노드 구조를 목표로 한다.
+최종적으로는 다음 ROS 노드 / 패키지 구조를 목표로 한다.
 
 - Estimator
 - Planner
@@ -597,24 +620,24 @@ Sensors
 - `rb_bringup`
 - `rb_estimation`
 - `rb_planning`
-- `rb_control`
+- `rb_standing_controller`
+- 필요 시 `rb_control`
 - `rb_safety`
 - `rb_recorder`
-- 필요 시 `rb_sim_bridge` / `rb_hw_interface`
+- 필요 시 `rb_sim_bridge` / `rb_hardware_interface`
 
 패키지 분리 시점 원칙
 
 1. `M10`
-   - 지금 단계에서는 runtime 경계만 먼저 고정한다.
-   - 즉 `Estimator -> Controller -> Safety` 노드 구조를 먼저 안정화하고,
-     패키지는 기존 `rb_controller` 안에 유지해도 된다.
+   - native `ros2_control` 실행 경계를 고정한다.
+   - 즉 `rb_estimation -> rb_standing_controller -> rb_hardware_interface -> rb_safety`
+     경로를 active path로 확정한다.
 2. `M11 ~ M12`
-   - estimator / controller / safety 사이의 msg, topic, param 계약이 굳으면
-     `rb_interfaces`, `rb_estimation`, `rb_control`, `rb_safety` 분리를 시작한다.
-   - 이 시점이 첫 번째 패키지 분리 기준선이다.
+   - 위 active path를 유지한 채 metrics / balance / control 고도화를 진행한다.
+   - 필요 시 `rb_control` 또는 추가 controller package를 확장한다.
 3. `M13 ~ M14`
    - RL / experiment infrastructure가 커지면
-     `rb_bringup`, `rb_recorder`, 필요 시 `rb_sim_bridge`를 분리한다.
+     `rb_bringup`, `rb_recorder`, 필요 시 `rb_sim_bridge`를 추가/분리한다.
    - 즉 launch / orchestration / logging을 제어 패키지와 분리한다.
 4. `M17`
    - planner / behavior가 실제 runtime 계층으로 들어오는 시점에
@@ -635,4 +658,4 @@ Sensors
 
 1. 포트폴리오 정리 / 문서·증빙 갱신
 2. small cleanup — raw reason parsing / runner polish
-3. 이후 M10+ 확장
+3. M10 선행 정리 반영 후 M11+ 확장

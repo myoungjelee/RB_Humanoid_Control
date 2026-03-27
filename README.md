@@ -1,7 +1,7 @@
 # RB_Humanoid_Control
 
 Isaac Sim 5.1 + ROS2 Humble 기반으로, 휴머노이드 제어 경로를
-`센서 -> 추정/관측 -> 제어(C++) -> 안전 -> 로그/KPI` 구조로 설계하고 검증한 Sim-to-Real 포트폴리오 프로젝트입니다.
+`센서 -> 상태추정 -> 제어 -> 안전 -> 로그/KPI` 구조로 설계하고 검증한 Sim-to-Real 포트폴리오 프로젝트입니다.
 
 핵심 목표는 "시뮬에서만 잠깐 도는 데모"가 아니라,
 **실기체 백엔드로 바꿔도 유지될 인터페이스와 검증 습관을 갖춘 제어 스택**을 만드는 것입니다.
@@ -16,13 +16,18 @@ Isaac Sim 5.1 + ROS2 Humble 기반으로, 휴머노이드 제어 경로를
 - M9 KPI/report 자동화 완료
   - `M8 raw -> M9 summary` 분리
   - `balance_off_kpi.json`, `balance_on_kpi.json`, `comparison.json`, `summary.md`, `m9/index.csv` 자동 생성
+- 현재 런타임 제어 경로를 `ros2_control` 기반으로 재정리
+  - `State Estimation -> Standing Controller Plugin -> command_raw -> Safety Layer -> command_safe -> Isaac/Hardware`
 - standing 실패의 핵심 원인 분리 완료
   - 문제: gain 부족보다 **`imu_link` 축을 control/body frame처럼 직접 읽던 해석 불일치**
   - 해결: publisher 수정이 아니라 observer 쪽 **`imu_frame_mode=g1_imu_link` 보정**
 
 ## 내가 만든 것
 
-- `rb_controller`: 200Hz C++ control loop와 dt/jitter 관측
+- 초기 C++ controller node 기반 200Hz control loop와 dt/jitter 관측 경로
+- `rb_estimation`: IMU / joint 기반 상태추정과 control-frame tilt 해석
+- `rb_standing_controller`: `ros2_control` controller plugin 기반 standing controller
+- `rb_hardware_interface`: `ros2_control` hardware interface
 - `rb_safety`: watchdog / tilt / clamp / velocity gating safety layer
 - `tmux/tmuxp`: 재현 가능한 실험 오케스트레이션
 - `M8 raw -> M9 summary`: KPI 자동 요약 파이프라인
@@ -31,13 +36,13 @@ Isaac Sim 5.1 + ROS2 Humble 기반으로, 휴머노이드 제어 경로를
 
 ## 시스템 구조
 
-아래 구조를 기준으로 `센서 / observer / controller / safety / KPI`를 한 흐름으로 연결했습니다.
+아래 구조를 기준으로 `센서 / 상태추정 / 제어 / 안전 / KPI`를 한 흐름으로 연결했습니다.
 
 ![System Architecture](reports/sim2real/images/standalone_backend/system_architecture.png)
 
-- `Isaac Sim -> ROS2 sensor interface -> observer/state prep -> C++ controller -> safety -> command apply -> logs/KPI` 흐름으로 구성했습니다.
-- 현재는 observer 로직이 control stack 내부에 붙어 있지만, 다음 단계 `M10`에서 observer / estimator 책임을 더 분리할 계획입니다.
-- 핵심은 구조가 분리된 상태에서 standing, disturbance, KPI까지 같은 경로로 검증됐다는 점입니다.
+- `Isaac Sim -> ROS2 sensor interface -> State Estimation -> Standing Controller Plugin -> command_raw -> Safety Layer -> command_safe -> Simulator/Hardware -> logs/KPI` 흐름으로 구성했습니다.
+- 현재 제어 실행 경로는 `controller_manager` 기반 `ros2_control` 구조로 정리되어 있습니다.
+- 기존 controller node 기반 경로는 archive로 남겨 두고, 현재 런타임 검증은 위 구조를 기준으로 진행합니다.
 
 ## 고정한 엔지니어링 결정
 
@@ -73,7 +78,7 @@ Isaac Sim 5.1 + ROS2 Humble 기반으로, 휴머노이드 제어 경로를
 | 단계 | 무엇을 했는가                                       | 무엇으로 검증했는가                                                   | 증빙                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | ---- | --------------------------------------------------- | --------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | M1   | `/clock`, `/rb/joint_states`, `/rb/imu` 브리지 확인 | topic publish 확인                                                    | [m1_standalone.png](reports/sim2real/images/standalone_backend/m1_standalone.png)                                                                                                                                                                                                                                                                                                                                                                                                                                         |
-| M2   | `rb_controller` 200Hz loop, dt/jitter 출력          | `/rb/command_raw`, `dt_mean/p95/max`                                  | [m2_controller_standalone.png](reports/sim2real/images/standalone_backend/m2_controller_standalone.png)                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| M2   | 초기 C++ controller node 200Hz loop, dt/jitter 출력 | `/rb/command_raw`, `dt_mean/p95/max`                                  | [m2_controller_standalone.png](reports/sim2real/images/standalone_backend/m2_controller_standalone.png)                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | M3   | command apply 경로 연결                             | `joint_states` before/after 변화                                      | [m3_command_standalone.png](reports/sim2real/images/standalone_backend/m3_command_standalone.png)                                                                                                                                                                                                                                                                                                                                                                                                                         |
 | M4   | safety gating 구조 정리                             | `CLAMP`, `JOINT_LIMIT`, `TIMEOUT`, `TILT`, `VELOCITY_LIMIT` 개별 증빙 | [m4_clamp_standalone.png](reports/sim2real/images/standalone_backend/m4_clamp_standalone.png), [m4_joint_limit_standalone.png](reports/sim2real/images/standalone_backend/m4_joint_limit_standalone.png), [m4_timeout_standalone.png](reports/sim2real/images/standalone_backend/m4_timeout_standalone.png), [m4_tilt_standalone.png](reports/sim2real/images/standalone_backend/m4_tilt_standalone.png), [m4_velocity_limit_standalone.png](reports/sim2real/images/standalone_backend/m4_velocity_limit_standalone.png) |
 | M5   | controller-only standing hold 확보, 실패 원인 분리  | `fall_event`, `sync_markers`, `loop_stats`, GUI 관찰                  | [fall_event.txt](logs/sim2real/m5/20260314-121949_m5_stand_sanity_qrefv7/m5/fall_event.txt), [sync_markers.txt](logs/sim2real/m5/20260314-121949_m5_stand_sanity_qrefv7/m5/sync_markers.txt), [loop_post_sync.txt](logs/sim2real/m5/20260314-121949_m5_stand_sanity_qrefv7/m5/loop_post_sync.txt), [overview.md](reports/sim2real/overview.md)                                                                                                                                                                                                                         |
@@ -150,7 +155,7 @@ https://github.com/user-attachments/assets/4e70156b-aca6-4c3a-859f-7526fa2f511e
   - `logs/sim2real/m9/20260315-000113/summary.md`
   - `logs/sim2real/m9/index.csv`
 
-## 현재 진행 상태 (2026-03-18)
+## 현재 진행 상태 (2026-03-27)
 
 - M0 Decision Lock: 완료
 - M1 Sensor Pipeline: 완료
@@ -162,13 +167,14 @@ https://github.com/user-attachments/assets/4e70156b-aca6-4c3a-859f-7526fa2f511e
 - M7 Safety-on standing: 완료
 - M8 Disturbance A/B: 대표 고정 외란 조건 기준 완료
 - M9 KPI / Report Automation: 완료
+- `ros2_control` 기반 standing controller / hardware interface 경로 재정리: 완료
 - 공개용 figure / video / README 세트 동기화: 완료
 
 ## 다음 단계
 
-- M10: Estimator / Observer 고도화
+- M10: Estimator / Observer 고도화 + `ros2_control` 기반 제어 경계 정리
 - M11: Balance Metrics
-- small cleanup: `reason_count.txt` raw parsing 정리
+- small cleanup: 문서/증빙 정합성 정리
 
 ## Baseline / Archive
 

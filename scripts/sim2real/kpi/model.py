@@ -23,7 +23,10 @@ def build_label_kpi(run_dir: Path, label: str) -> dict[str, Any]:
     disturb = parse_key_float_file(label_dir / "disturb_kpi.txt")
     reasons = parse_reason_count(label_dir / "reason_count.txt")
     sync = parse_sync_markers(label_dir / "sync_markers.txt")
-    start = parse_start(label_dir / "start.txt")
+    start_source = label_dir / "start.txt"
+    if not start_source.exists():
+        start_source = label_dir / "ros2_control.log"
+    start = parse_start(start_source)
     loop_stats = parse_loop_stats(label_dir / "loop_post_sync.txt")
 
     survival_after_disturb_sec = None
@@ -74,7 +77,7 @@ def build_label_kpi(run_dir: Path, label: str) -> dict[str, Any]:
             "disturb_kpi": str(label_dir / "disturb_kpi.txt"),
             "reason_count": str(label_dir / "reason_count.txt"),
             "sync_markers": str(label_dir / "sync_markers.txt"),
-            "start": str(label_dir / "start.txt"),
+            "start": str(start_source),
         },
     }
     kpi.update(load_trim_hint())

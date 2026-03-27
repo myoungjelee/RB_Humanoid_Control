@@ -6,18 +6,19 @@ Isaac Sim과 실기체에서 재사용 가능한 ROS2 제어 스택 인터페이
 
 ## 무엇을 만들었는가
 - `/clock`, `/rb/joint_states`, `/rb/imu`, `/rb/command*` 기준 ROS2 인터페이스
-- `rb_controller` C++ 200Hz control loop + dt/jitter 관측
-- `rb_safety` safety gating
+- 초기 C++ controller node 기반 200Hz control loop + dt/jitter 관측
+- `ros2_control` 기반 standing controller plugin / hardware interface 경로
+- `rb_estimation` 상태추정 경로와 `rb_safety` safety layer
 - sync marker 기반 로그/실험 오케스트레이션
 - M8 raw -> M9 summary 자동 요약 경로
-- standing 디버깅용 observer/debug 모듈화
+- IMU `control frame` 해석과 standing 디버깅용 observer/debug 모듈화
 
 ## 대표 결과
 | 단계 | 구현 | 검증 | 증빙 |
 | --- | --- | --- | --- |
 | M1~M4 | 센서, controller loop, command apply, safety pipeline | topic publish / dt-jitter / reason별 safety 발동 | [m1](images/standalone_backend/m1_standalone.png), [m2](images/standalone_backend/m2_controller_standalone.png), [m3](images/standalone_backend/m3_command_standalone.png), [m4 velocity](images/standalone_backend/m4_velocity_limit_standalone.png) |
-| M5 | controller-only standing hold | `fall_event`, `sync marker`, `loop_stats`, GUI 관찰 | [overview.md](overview.md), [stand_pd_sanity.yaml](../../ros2_ws/src/rb_controller/config/scenarios/stand_pd_sanity.yaml) |
-| M7 | safety-on standing 재통합 | `CONTROL_ACTIVE` 기준 60초 `NO_FALL_EVENT`, `NO_SAFETY_REASON` | [m7_t0.png](images/standalone_backend/m7_t0.png), [m7_t60.png](images/standalone_backend/m7_t60.png), [stand_pd_safecheck.yaml](../../ros2_ws/src/rb_controller/config/scenarios/stand_pd_safecheck.yaml) |
+| M5 | controller-only standing hold | `fall_event`, `sync marker`, `loop_stats`, GUI 관찰 | [overview.md](overview.md), [fall_event.txt](../../logs/sim2real/m5/20260314-121949_m5_stand_sanity_qrefv7/m5/fall_event.txt) |
+| M7 | safety-on standing 재통합 | `CONTROL_ACTIVE` 기준 60초 `NO_FALL_EVENT`, `NO_SAFETY_REASON` | [m7_t0.png](images/standalone_backend/m7_t0.png), [m7_t60.png](images/standalone_backend/m7_t60.png), [fall_event.txt](../../logs/sim2real/m7/20260314-133954_m7_stand_safecheck/m7/fall_event.txt) |
 | M8 | disturbance A/B | `113N x 0.10s`에서 `OFF 3/3 fall`, `ON 3/3 no-fall` | [m8_disturb_tilted.png](images/standalone_backend/m8_disturb_tilted.png), [m8_disturb_recovered.png](images/standalone_backend/m8_disturb_recovered.png), [run_m8_pair.sh](../../ops/run_m8_pair.sh) |
 | M9 | KPI/report 자동화 | `comparison.json`, `summary.md`, `m9/index.csv` 자동 생성 | [extract_m8_kpi.py](../../scripts/sim2real/extract_m8_kpi.py), [run_m9_kpi.sh](../../ops/run_m9_kpi.sh) |
 
@@ -49,7 +50,8 @@ Isaac Sim과 실기체에서 재사용 가능한 ROS2 제어 스택 인터페이
 - M7 safety-on standing 완료
 - M8 대표 disturbance A/B 확보
 - M9 KPI/report 자동화 완료
-- 다음 단계: M10 observer / estimator refinement
+- 현재 제어 실행 경로: `State Estimation -> Standing Controller Plugin -> command_raw -> Safety Layer -> command_safe`
+- 다음 단계: M10 estimator / observer 고도화 + `ros2_control` 기반 제어 경계 정리
 
 ## 핵심 링크
 - 랜딩 페이지: [README.md](../../README.md)

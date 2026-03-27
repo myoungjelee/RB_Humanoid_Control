@@ -1,3 +1,6 @@
+# Legacy archive.
+# Active native stack는 rb_bringup/config/m*_stack*.yaml 안의 rb_safety 파라미터를 쓴다.
+# 이 파일은 예전 rb_controller 기반 실험 기록을 보존하기 위한 참고용 설정이다.
 rb_controller:
   ros__parameters:
     safety_enabled: true

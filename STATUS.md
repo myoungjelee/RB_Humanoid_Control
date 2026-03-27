@@ -3,57 +3,62 @@
 ## 1. 현재 프로젝트 한 줄 요약
 휴머노이드 제어 엔지니어 포지션 지원을 위해, 실기체 없이 Isaac Sim + ROS2 기반 휴머노이드 제어 시스템을 직접 구성하고 증빙하는 프로젝트.
 
-## 2. 현재 결정사항
+## 2. 현재 고정된 기준
+### active 실행 경로
+- `rb_estimation -> rb_standing_controller -> rb_hardware_interface -> rb_safety -> Isaac`
+- 즉 active runtime은 native `ros2_control` standing stack 기준이다.
+
 ### 유지
 - 로봇 모델은 G1 유지
 - Gym/IsaacLab Stage1 코드는 baseline/archive로 유지
 - 실행 진입점은 루트 `main.py` 유지
-
-### 폐기
-- `saved USD`를 메인 source of truth로 쓰는 방식 폐기
-- Lab에서 한 번 돌리고 저장한 USD를 메인 자산으로 쓰지 않음
-
-### 채택
 - 메인 경로는 `원본 G1 asset/cfg direct spawn + standalone World.step()`
-- `saved USD`는 debug/reference artifact로만 사용
-- M5는 disturbance 기준 baseline/stand 비교로 재정의
 
-## 3. 완료된 것
-### 구조/아키텍처
-- ROS2 메인 트랙을 standalone `World.step()` 기준으로 재정리
-- mixed command path 정리(effort-only 경로 정리)
-- tmuxp 기반 재검증 플로우 정리
-- standalone backend code path를 `isaaclab_assets.robots.unitree.G1_CFG` direct spawn 기준으로 전환
-- `rb_controller` 패키지 책임도 다시 나눴다. 공용 메시지는 `rb_interfaces`, 추정은 `rb_estimation`, safety는 `rb_safety`로 분리했고, `rb_controller`는 legacy controller + bridge + scenario/launch 중심 패키지로 가볍게 정리했다.
-- active native path는 이제 `rb_controller` launch에 기대지 않는다. `rb_bringup/native_stack.launch.py`와 `rb_bringup/config/m7_stack_safety_on.yaml`이 `rb_estimator + rb_safety` 기본 경로를 소유하고, `rb_controller`는 legacy fallback 패키지로만 남는다.
-- `rb_controller/COLCON_IGNORE`도 추가했다. 즉 현재 workspace 기본 build 대상에서는 빠지고, 정말 legacy replay가 필요할 때만 ignore를 치우는 구조다.
-- native standing smoke에서 safety가 자르는 `tilt_limit_roll/pitch_rad`는 xacro joint lower/upper와 다른 **정책 임계값**이다. 즉 실제 기구학 리밋은 xacro 값을 유지하고, controller 검사용으로는 safety 임계값만 별도 조정한다.
-- 이를 위해 `rb_bringup/config/m5_stack_relaxed.yaml`을 추가했다. 이 파일은 xacro와 같은 joint lower/upper를 유지한 채 `tilt_limit_roll/pitch_rad`만 `1.2 rad`로 완화해, native standing controller 자체가 얼마나 버티는지 먼저 볼 때 사용한다.
-- `20260327-144400_m10_5_native_stack_relaxed` 기준으로는 이 목적이 달성됐다. 초기 `TIMEOUT` 1회 후 safety가 clear됐고, `command_safe_once.txt`에 nonzero leg effort가 남았다. 즉 이 시점부터는 native path에서 robot이 넘어지는 원인을 safety gate가 아니라 standing controller baseline/tuning 쪽에서 봐야 한다.
-- xacro/source-of-truth 정합성도 다시 점검했다. `rb_safety.joint_limits.*`는 xacro와 맞고, `rb_standing_controller.limit_avoid_lower`의 ankle pitch lower 두 값도 `-0.75 -> -0.67999996799`로 바로잡았다. 이어서 `stand_qref_g1_seed.yaml`과 plugin `stand_q_ref`를 비교해 `left/right_hip_yaw_joint`, `left/right_shoulder_roll_joint` 값 4개가 뒤바뀐 것도 수정했다. 즉 지금은 spawn seed와 native plugin nominal reference도 같은 기준을 쓴다.
-- startup sequencing 때문에 native smoke 초반에 `TIMEOUT` 1회가 찍히던 것도 정리했다. `rb_safety`는 이제 "첫 valid command를 받은 뒤부터만 timeout watchdog을 arm"한다. 즉 첫 `/rb/command_raw` 전 startup 대기 구간은 장애로 보지 않고, 그 이후부터만 stale command를 timeout으로 판정한다.
-- legacy/native A/B 비교용 `stand_pd_native_compare_relaxed.yaml`은 정리 단계에서 제거했다. active source-of-truth는 이제 `rb_standing_controller` native path 하나다.
+### legacy 처리
+- `rb_controller`는 active runtime에서 제외됐다.
+- 현재는 `COLCON_IGNORE`가 걸린 legacy/archive 패키지로만 유지한다.
+- active tmux/profile/wrapper는 더 이상 `rb_controller`에 의존하지 않는다.
 
-### standalone 재검증
-- M1 완료
-  - `/clock`, `/rb/joint_states`, `/rb/imu` 확인
-- M2 완료
-  - controller 200Hz loop / `/rb/command_raw` 확인
-- M3 완료
-  - command apply / joint state 변화 확인
-- M4 완료
-  - `CLAMP`, `JOINT_LIMIT`, `TIMEOUT`, `TILT` 개별 재검증 완료
+### source of truth
+- joint ordering: [joint_order_g1.yaml](/home/leemou/Projects/RB_Humanoid_Control/ros2_ws/src/rb_bringup/config/joint_order_g1.yaml)
+- standing seed/reference: [stand_qref_g1_seed.yaml](/home/leemou/Projects/RB_Humanoid_Control/ros2_ws/src/rb_bringup/config/stand_qref_g1_seed.yaml)
+- 공통 standing controller baseline: [standing_controller_baseline.yaml](/home/leemou/Projects/RB_Humanoid_Control/ros2_ws/src/rb_bringup/config/standing_controller_baseline.yaml)
+- milestone stack profile:
+  - [m5_stack_relaxed.yaml](/home/leemou/Projects/RB_Humanoid_Control/ros2_ws/src/rb_bringup/config/m5_stack_relaxed.yaml)
+  - [m7_stack_safety_on.yaml](/home/leemou/Projects/RB_Humanoid_Control/ros2_ws/src/rb_bringup/config/m7_stack_safety_on.yaml)
+  - [m8_stack_disturb.yaml](/home/leemou/Projects/RB_Humanoid_Control/ros2_ws/src/rb_bringup/config/m8_stack_disturb.yaml)
 
-### 최신 리팩 완료 (2026-03-23)
-- ROS control stack을 `Estimator -> Controller -> Safety` 런타임 경계로 재정리했다. `rb_estimator_node`를 분리했고, `/rb/estimated_state`를 도입해 controller와 safety가 같은 추정 상태를 기준으로 동작하도록 맞췄다.
-- safety는 raw IMU direct tilt 해석 대신 estimated state를 사용하도록 정리했다. controller 내부도 `controller_stand_utils.*`, `controller_runtime_state.hpp` 기준으로 helper/runtime cache를 분리해 node 책임을 더 얇게 만들었다.
-- Isaac app은 `main -> phase_registry -> phase_handlers -> phase_runtime` 구조로 phase orchestration을 분리했고, world(`world_factory/runtime/spawn`), bridge(`graph_prim_resolver`, `sensor_graph_builder`, `command_apply_graph_builder`), KPI(`kpi/parsers/model/writers`) 레이어를 나눴다. 구조화 로그는 `telemetry.py`로 모았다.
-- 기존 엔트리 경로는 유지했다. `main.py`, `controller.launch.py`, `ops/run_m8_and_m9.sh`, `extract_m8_kpi.py`는 그대로 쓰되 내부 구현만 facade + 분리 모듈 구조로 정리했다.
-- 검증은 `colcon build --packages-select rb_controller`, Python syntax check, `python main.py --phase m1_sensor --steps 2 --headless`, `ops/run_m8_and_m9.sh` smoke까지 통과했다. smoke 중 드러난 `extract_m8_kpi.py` import 경로 문제와 `kpi/writers.py`의 short-run `None` 포맷 문제도 수정했다.
-- 주의: 아래 구간에 남아 있는 `estimator 분리는 M10에서 진행` 같은 문구는 리팩 이전 메모다. 현재는 경계 분리는 완료됐고, 다음 M10의 초점은 estimator 내부 refinement와 contract 안정화다.
+## 3. 현재 상태
+### 구조
+- `rb_interfaces`, `rb_estimation`, `rb_safety`, `rb_standing_controller`, `rb_hardware_interface`, `rb_bringup` 기준으로 패키지 경계를 정리했다.
+- `rb_standing_controller`는 active custom controller plugin이고, `rb_hardware_interface`는 active hardware plugin이다.
+- startup sequencing 때문에 초기에 찍히던 `TIMEOUT`은 `rb_safety`를 "첫 valid command 이후에 arm"하도록 바꿔 정리했다.
+
+### standing / revalidation
+- native standing path에서 실제로 선다.
+- legacy `m7` safecheck도 다시 서는 것을 확인했고, native path도 같은 기준에서 standing을 재확인했다.
+- 핵심 수정은 IMU publisher를 뒤집는 게 아니라, estimator의 tilt observer가 `g1_imu_link -> control frame` 기준으로 tilt/rate를 해석하도록 유지한 것이다.
+- xacro/source-of-truth 정합성도 다시 맞췄다.
+  - `rb_safety.joint_limits.*`는 xacro와 일치
+  - `rb_standing_controller.limit_avoid_lower`의 ankle pitch lower도 xacro 기준으로 수정
+  - `stand_q_ref`와 runtime joint ordering도 다시 맞춤
+
+### milestone 운영
+- `M5/M7/M8`은 공통 standing baseline 하나를 사용한다.
+- milestone마다 달라지는 것은 controller gain이 아니라 stack/safety profile과 실험 스위치다.
+- `M8/M9` 대표 증빙은 기존 결과를 유지하고, 현재 focus는 `M10` 선행 정리와 이후 `M11+` 확장 준비다.
+
+### 현재 보류 / 후속 이슈
+- `rb_controller`는 아직 문서/legacy tmux 참조가 남아 있어 즉시 삭제하지 않고 archive로 보관한다.
+- `M8`의 `enable_tilt_feedback` ON/OFF override는 현재 launch override 정합성을 다시 봐야 한다.
+  - 이건 `M11`의 metrics/tuning 단계에서 함께 정리할 예정이다.
+
+## 4. 상세 작업 로그 / 변경 이력
+아래부터는 날짜별 실험 메모와 구조 변경 이력을 누적해 둔 구간이다.
+현재 active truth는 위 `2. 현재 고정된 기준`, `3. 현재 상태`를 우선 기준으로 본다.
 
 
-## 4. 최근 조사 결과
+### 최근 조사 결과
 ### IsaacLab asset reference
 - `/home/leemou/IsaacLab/source/isaaclab_assets/isaaclab_assets/robots/unitree.py` 기준 `G1_CFG -> Robots/Unitree/G1/g1.usd` direct spawn 경로 확인
 
@@ -355,3 +360,45 @@
 - 그래서 native 기본 controller 설정도 legacy에서 safety-on으로 서 있던 `M7 safecheck` baseline으로 올렸다. `rb_standing_controller`는 이제 `stand_kp/kd=60/4`, `stand_effort_abs_max=18`, `stand_hold_current_on_start=false`, 검증된 `stand_q_ref`, 관절군별 gain scale, `tilt_apply_mode=qref_bias`, `stand_tilt_cut_enable=false`를 기본으로 사용한다. `rb_safety`도 같은 baseline에 맞춰 `effort_abs_max_default=18`, `tilt_limit_roll/pitch_rad=0.6`로 되돌렸다.
 - 그 다음 `20260327-142746_m10_5_native_stack`에서는 robot이 뒤로 붕괴했다. 이 로그를 보면 pitch 축 해석은 계속 정상(`axis=PITCH pitch=-0.605`)이지만, 이번에는 native plugin의 `joints:` 순서와 `stand_q_ref` source-of-truth 순서가 달랐다. 즉 native controller가 검증된 `stand_q_ref` 값을 잘못된 관절에 대입하고 있었다.
 - 그래서 `rb_bringup/config/standing_controller_baseline.yaml`의 `rb_standing_controller.joints`와 `rb_effort_forward_controller.joints`를 모두 `joint_order_g1.yaml` 순서로 통일했다. 현재 native plugin은 이제 `stand_qref_g1_seed.yaml`와 같은 순서 기준으로 reference/command를 해석한다.
+
+### 2026-03-27 추가 정리 — native standing 재안정화 및 truth 재정의
+- native path와 legacy path가 한동안 같이 무너지던 원인을 다시 추적한 결과, 핵심은 `rb_estimation/controller_tilt_observer.cpp`의 IMU 해석 계약을 중간에 잘못 건드린 것이었다. 최종적으로는 G1 IMU raw frame을 control frame 기준으로 해석하는 기존 계약을 유지했고, 그 결과 legacy `m7` safecheck와 native standing path가 다시 모두 섰다.
+- 이 시점부터 source of truth는 legacy `rb_controller`가 아니라 native path로 고정했다. 현재 active runtime은 `rb_estimation -> rb_standing_controller -> rb_hardware_interface -> rb_safety -> Isaac`이고, `rb_controller`는 `COLCON_IGNORE`가 걸린 legacy/archive 패키지로만 유지한다.
+- `rb_controller`를 즉시 삭제하지 않는 이유도 정리했다. active runtime은 이미 의존하지 않지만, `README`, `STATUS`, `reports`, `MASTER_PLAN`, legacy tmux/scenario 참조가 남아 있으므로 지금 단계에서는 archive 보관이 맞다.
+
+### 2026-03-27 추가 정리 — 마일스톤 실행 경로/설정 정리
+- active tmux 경로는 native 기준으로 정리했다. 루트 `ops/tmuxp/`에는 `m1_sensor`, `m5_pose_audit`, `m5_stand`, `m7_stand_safecheck`, `m8_disturb`만 남기고, legacy 세션은 `ops/tmuxp/legacy/`로 이동했다.
+- 마일스톤별 실행 profile도 `ops/profiles/`로 분리했다. 현재 active profile은 `m5_stand.env`, `m7_stand_safecheck.env`, `m8_disturb.env`다.
+- config 이름도 현재 역할이 바로 드러나게 다시 정리했다.
+  - 공통 controller baseline: `rb_bringup/config/standing_controller_baseline.yaml`
+  - M5 relaxed stack: `rb_bringup/config/m5_stack_relaxed.yaml`
+  - M7 safety-on stack: `rb_bringup/config/m7_stack_safety_on.yaml`
+  - M8 disturbance stack: `rb_bringup/config/m8_stack_disturb.yaml`
+- 현재 운영 원칙도 고정했다. `M5/M7/M8`은 공통 controller baseline 하나를 쓰고, milestone마다 달라지는 것은 controller gain이 아니라 stack/safety profile과 실험 스위치다.
+
+### 2026-03-27 추가 정리 — 공통 standing baseline 재정의
+- 공통 standing baseline은 이제 `standing_controller_baseline.yaml` 하나로 통일했다. 이 파일은 M8 tuned 값을 기준으로 승격한 baseline이다.
+- 현재 핵심값은 아래와 같다.
+  - `stand_kp=50.0`
+  - `stand_kd=3.5`
+  - `stand_kd_scale_ankle=1.8`
+  - `tilt_qref_bias_abs_max=0.03`
+  - `tilt_kp_roll/kd_roll=2.0/0.4`
+  - `tilt_kp_pitch/kd_pitch=8.0/1.6`
+  - `stand_q_ref_trim` 적용
+- 즉 현재는 M7 safecheck용 gain과 M8 disturbance용 gain을 따로 들고 가는 구조가 아니라, 공통 standing baseline 하나를 기준으로 이후 `M11`에서 다시 정밀 튜닝하는 흐름으로 정리했다.
+
+### 2026-03-27 추가 정리 — M8/M9 자동 실행 정리
+- `ops/run_m8_pair.sh`와 `ops/run_m8_and_m9.sh`도 현재 config/profile 이름 기준으로 정리했다. M8 disturbance 자동 실행은 더 이상 legacy scenario YAML이나 M8 전용 controller 파일에 기대지 않는다.
+- M8 세션 종료 흐름도 줄였다. disturbance는 더 빨리 시작하고, `FALL_EVENT`가 찍히면 tmux 쪽에서 짧게 추가 캡처만 하고 세션을 정리하도록 바꿨다.
+- 단, 현재 `M8`의 `enable_tilt_feedback` ON/OFF 비교는 아직 완전히 신뢰하지 않는다. 최신 로그를 보면 `balance_off`도 실제 configure 시점에는 `enable_tilt_feedback=true`로 찍히는 run이 있어, launch override 정합성은 `M11`에서 metrics/tuning과 함께 다시 보기로 했다.
+- 따라서 현재 판단은 이렇게 둔다.
+  - 완료: native M8/M9 실행 파이프라인 정리
+  - 완료: M8/M9 산출물 parser/model이 active baseline 기준으로 읽히게 수정
+  - 보류: `enable_tilt_feedback` ON/OFF override 정합성 재검토
+
+### 2026-03-27 추가 정리 — 보조 스크립트/문서 active truth 반영
+- `scripts/sim2real/kpi/parsers.py`는 이제 `rb_controller` scenario가 아니라 `standing_controller_baseline.yaml`에서 trim hint를 읽는다.
+- `scripts/sim2real/kpi/model.py`는 `start.txt`가 없으면 `ros2_control.log`를 source로 써서 active native run의 controller 파라미터를 읽는다.
+- legacy safety 설정 파일은 `scripts/sim2real/config/legacy_rb_controller_safety.yaml`로 이름을 바꿨다. active native stack은 `rb_bringup/config/m*_stack*.yaml`을 기준으로 본다.
+- `MASTER_PLAN.md`도 현재 구조 기준으로 다시 맞췄다. `M8/M9` 대표 증빙은 그대로 두고, 이번 native 리팩은 `M10`의 "Estimator / Observer 고도화 + Native Control Stack 고정"으로 흡수했다.
