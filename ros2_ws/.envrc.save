@@ -1,0 +1,47 @@
+# ===============================
+# ROS2 Project Environment (.envrc)
+# ===============================
+
+echo "----------------------------------------"
+echo "[direnv] Loading ROS2 environment..."
+
+# 1. ROS base
+if [ -f /opt/ros/humble/setup.bash ]; then
+    source /opt/ros/humble/setup.bash
+    echo "[direnv] ROS base loaded: humble"
+else
+    echo "[direnv][ERROR] ROS humble not found"
+fi
+
+# 2. Workspace overlay
+if [ -f ./install/setup.bash ]; then
+    source ./install/setup.bash
+    echo "[direnv] Workspace overlay loaded"
+else
+    echo "[direnv][WARN] install/setup.bash not found"
+fi
+
+# 3. ROS network settings
+export ROS_DOMAIN_ID=0
+export ROS_LOCALHOST_ONLY=1
+
+echo "[direnv] ROS_DOMAIN_ID=${ROS_DOMAIN_ID}"
+echo "[direnv] ROS_LOCALHOST_ONLY=${ROS_LOCALHOST_ONLY}"
+
+# 4. (선택) DDS 설정
+# export RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
+# echo "[direnv] RMW_IMPLEMENTATION=${RMW_IMPLEMENTATION}"
+
+# 5. (선택) GPU 설정
+# export CUDA_VISIBLE_DEVICES=0
+# echo "[direnv] CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES}"
+
+# 6. (선택) 프로젝트 변수
+export PROJECT_NAME="ros2_study"
+echo "[direnv] PROJECT_NAME=${PROJECT_NAME}"
+
+# 7. PATH 확인 (디버깅용)
+echo "[direnv] PATH includes ROS? -> $(echo $PATH | grep ros)"
+
+echo "[direnv] Environment ready"
+echo "----------------------------------------"

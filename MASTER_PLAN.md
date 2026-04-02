@@ -406,6 +406,9 @@ run 결과를 자동 요약하고 run 간 비교 가능한 형태로 만든다.
 
 포트폴리오 정리/문서화는 공식 milestone이 아니라 보조 작업으로 별도 관리한다.
 
+아래 `M11+`는 "포트폴리오 증빙 순서"가 아니라,
+실제 휴머노이드 제어 능력을 쌓아 가는 순서를 기준으로 다시 정의한다.
+
 ---
 
 # M10 — Estimator / Observer 고도화 + Native Control Stack 고정
@@ -440,67 +443,104 @@ active path
 
 ---
 
-# M11 — Balance Metrics
+# M11 — Reactive Standing Envelope + Balance Metrics
 
 목표
 
-넘어짐을 물리적으로 설명할 수 있는 지표를 추가한다.
+현재 `M5/M7/M8` standing baseline을 더 "바로 서 있는" 상태로 고도화하고,
+정해진 외란 범위 안에서 복원 가능한 reactive standing을 만든다.
 
-계산
+구성
 
+- estimator / observer refinement
+- disturbance envelope 정의
 - COM projection
 - ZMP
 - capture point
 - support polygon margin
+- recovery time / peak tilt / settle time
+
+핵심 질문
+
+작은 외란에 대해서
+"기우뚱거리며 겨우 버틴다"가 아니라
+"upright posture를 다시 회복하며 선다"를 만들 수 있는가
 
 ---
 
-# M12 — Whole-Body Control
+# M12 — Standing Recovery Control (WBC / MPC / Recovery Step)
 
 목표
 
-joint-space PD에서 task-space control로 확장한다.
+joint-space stand PD에서 벗어나,
+task-space / model-based standing recovery로 확장한다.
 
-가능한 task
+핵심 제어
 
 - CoM
 - torso
 - foot
+- foot placement
+- recovery step trigger
+
+가능한 접근
+
+- WBC
+- MPC
+- reference generator + stabilizer
+
+핵심 질문
+
+더 큰 외란에 대해서
+상체/발목만으로 버티는 것이 아니라,
+필요하면 발을 옮겨가며 다시 설 수 있는가
 
 ---
 
-# M13 — RL Policy Layer
+# M13 — Walking / Locomotion
 
 목표
 
-low-level stabilizing controller 위에 policy layer를 추가한다.
+recovery step을 연속 locomotion으로 확장한다.
+
+구조
+
+- gait / phase management
+- step timing
+- start / stop / turn
+- velocity command tracking
+
+핵심 질문
+
+비상 복구용 한 발 내딛기를 넘어서,
+의도적인 다중 스텝 보행을 만들 수 있는가
+
+---
+
+# M14 — RL Policy Layer
+
+목표
+
+low-level stabilizing controller / locomotion stack 위에
+policy layer를 추가한다.
 
 구조
 
 low level stabilizing controller
 → high level policy / residual / reference
 
----
+의도
 
-# M14 — Experiment Infrastructure
-
-목표
-
-실험 결과 관리 자동화를 더 고도화한다.
-
-가능한 기능
-
-- run comparison dashboard
-- KPI trend plots
-- failure taxonomy
-- auto markdown summary
+- hand-designed stabilizer를 버리는 것이 아니라,
+  그 위에 learned policy를 얹어 robustness / agility / command tracking을 넓힌다.
 
 ---
 
-# M15 — Sim-to-Real Hardening
+# M15 — Sim-to-Real Hardening + Experiment Infrastructure
 
 목표
 
+실험 결과를 체계적으로 비교 가능하게 유지하면서,
 실기체 대응 robustness를 높인다.
 
 추가
@@ -509,6 +549,15 @@ low level stabilizing controller
 - sensor noise
 - latency
 - domain randomization
+- run comparison dashboard
+- KPI trend plots
+- failure taxonomy
+- auto markdown summary
+
+핵심 질문
+
+걷기 / recovery controller가
+깨끗한 sim 한 장면이 아니라 다양한 조건 변화에도 유지되는가
 
 ---
 
@@ -539,12 +588,13 @@ real-time execution 환경을 구축한다.
 
 ---
 
-# M17 — Behavior / Task Planner
+# M17 — Behavior / Task Planner + VLA Interface
 
 목표
 
-low-level controller 위에 behavior / task planner 계층을 추가해
-휴머노이드 전체 제어 시스템을 완성한다.
+low-level controller / locomotion 위에
+behavior / task planner 계층을 추가하고,
+필요 시 VLA 같은 high-level task interface를 연결한다.
 
 planner는 robot state / disturbance 상태 / task mode를 기반으로
 action primitive를 선택하고 controller reference를 생성한다.
@@ -562,6 +612,14 @@ planner
 - sit
 - recover
 - step preparation
+- walk
+- turn
+
+후속 high-level 범위
+
+- task mode selection
+- semantic command to behavior mapping
+- VLA / multimodal policy interface
 
 핵심 질문
 
@@ -632,15 +690,15 @@ Sensors
    - native `ros2_control` 실행 경계를 고정한다.
    - 즉 `rb_estimation -> rb_standing_controller -> rb_hardware_interface -> rb_safety`
      경로를 active path로 확정한다.
-2. `M11 ~ M12`
-   - 위 active path를 유지한 채 metrics / balance / control 고도화를 진행한다.
+2. `M11 ~ M13`
+   - 위 active path를 유지한 채 estimation / balance / locomotion control을 고도화한다.
    - 필요 시 `rb_control` 또는 추가 controller package를 확장한다.
-3. `M13 ~ M14`
-   - RL / experiment infrastructure가 커지면
+3. `M14 ~ M16`
+   - RL / hardening / experiment infrastructure / RT 요구가 커지면
      `rb_bringup`, `rb_recorder`, 필요 시 `rb_sim_bridge`를 추가/분리한다.
-   - 즉 launch / orchestration / logging을 제어 패키지와 분리한다.
+   - 즉 launch / orchestration / logging / deployment 계층을 제어 패키지와 분리한다.
 4. `M17`
-   - planner / behavior가 실제 runtime 계층으로 들어오는 시점에
+   - planner / behavior / VLA interface가 실제 runtime 계층으로 들어오는 시점에
      `rb_planning`을 별도 패키지로 추가한다.
 
 정리하면,
@@ -656,6 +714,7 @@ Sensors
 
 현재 우선순위는 아래 순서로 고정한다.
 
-1. 포트폴리오 정리 / 문서·증빙 갱신
-2. small cleanup — raw reason parsing / runner polish
-3. M10 선행 정리 반영 후 M11+ 확장
+1. `M11` reactive standing + balance metrics 범위 정의와 계약 정리
+2. `M12` standing recovery control 방향 결정 (`WBC` / `MPC` / hybrid)
+3. `M13` walking 진입 전제 정리
+4. 문서·증빙 갱신과 small cleanup은 보조 작업으로 병행
