@@ -5,7 +5,7 @@ shell_command_before:
   - export RUN_ID="${RUN_ID:?Set RUN_ID before tmuxp load}"
   - export RESULT_LABEL="${RESULT_LABEL:?Set RESULT_LABEL (balance_off/balance_on) before tmuxp load}"
   - export ENABLE_TILT_FEEDBACK="${ENABLE_TILT_FEEDBACK:?Set ENABLE_TILT_FEEDBACK (true/false) before tmuxp load}"
-  - export PROFILE_PATH="${PROFILE_PATH:-$ROOT_DIR/ops/profiles/m8_disturb.env}"
+  - export PROFILE_PATH="${PROFILE_PATH:-$ROOT_DIR/experiments/profiles/m8_disturb.env}"
   - set -a
   - source "$PROFILE_PATH"
   - set +a
@@ -15,6 +15,7 @@ shell_command_before:
   - export POST_DIST_CAPTURE_SEC="${POST_DIST_CAPTURE_SEC:-$POST_DIST_CAPTURE_SEC_DEFAULT}"
   - export POST_FALL_CAPTURE_SEC="${POST_FALL_CAPTURE_SEC:-$POST_FALL_CAPTURE_SEC_DEFAULT}"
   - export AUTO_KILL_AFTER_CAPTURE="${AUTO_KILL_AFTER_CAPTURE:-$AUTO_KILL_AFTER_CAPTURE_DEFAULT}"
+  - export ISAAC_APP_ARGS="${ISAAC_APP_ARGS:-}"
   - export STACK_PARAMS_PATH="${STACK_PARAMS_PATH:-$STACK_PARAMS_PATH_DEFAULT}"
   - export CONTROLLERS_PATH="${CONTROLLERS_PATH:-$CONTROLLERS_PATH_DEFAULT}"
   - mkdir -p "$BASE"
@@ -24,23 +25,23 @@ windows:
     panes:
       - shell_command:
           - cd /home/leemou/Projects/RB_Humanoid_Control
-          - python main.py --phase "$ISAAC_PHASE" 2>&1 | tee "$BASE/isaac.log"
+          - bash tools/isaac_python.sh main.py --phase "$ISAAC_PHASE" $ISAAC_APP_ARGS 2>&1 | tee "$BASE/isaac.log"
       - shell_command:
           - cd /home/leemou/Projects/RB_Humanoid_Control
-          - source /opt/ros/humble/setup.bash
+          - source "/opt/ros/${ROS_DISTRO:-jazzy}/setup.bash"
           - source ros2_ws/install/setup.bash
           - export ROS_LOG_DIR=/tmp/ros_logs
           - ros2 launch rb_bringup ros2_control.launch.py controllers_file:="$CONTROLLERS_PATH" enable_tilt_feedback:="$ENABLE_TILT_FEEDBACK" command_topic:=/rb/command_raw 2>&1 | tee "$BASE/ros2_control.log"
       - shell_command:
           - cd /home/leemou/Projects/RB_Humanoid_Control
-          - source /opt/ros/humble/setup.bash
+          - source "/opt/ros/${ROS_DISTRO:-jazzy}/setup.bash"
           - source ros2_ws/install/setup.bash
           - export ROS_LOG_DIR=/tmp/ros_logs
           - timeout "$CAPTURE_MAX_SEC" ros2 launch rb_bringup native_stack.launch.py params_file:="$STACK_PARAMS_PATH" 2>&1 | tee "$BASE/native_stack.log"
           - exec bash
       - shell_command:
           - cd /home/leemou/Projects/RB_Humanoid_Control
-          - source /opt/ros/humble/setup.bash
+          - source "/opt/ros/${ROS_DISTRO:-jazzy}/setup.bash"
           - source ros2_ws/install/setup.bash
           - 'echo "[INFO] M8 native disturbance compare label=${RESULT_LABEL} enable_tilt_feedback=${ENABLE_TILT_FEEDBACK}"'
           - echo "[WAIT] waiting for standing controller activation (max ${CAPTURE_MAX_SEC}s)"

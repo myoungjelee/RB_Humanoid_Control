@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-PROFILE_PATH="${PROFILE_PATH:-$ROOT_DIR/ops/profiles/m8_disturb.env}"
+PROFILE_PATH="${PROFILE_PATH:-$ROOT_DIR/experiments/profiles/m8_disturb.env}"
 set -a
 source "$PROFILE_PATH"
 set +a
@@ -16,6 +16,21 @@ AUTO_KILL_AFTER_CAPTURE="${AUTO_KILL_AFTER_CAPTURE:-$AUTO_KILL_AFTER_CAPTURE_DEF
 SESSION_START_TIMEOUT_SEC="${SESSION_START_TIMEOUT_SEC:-15}"
 STACK_PARAMS_PATH="${STACK_PARAMS_PATH:-$STACK_PARAMS_PATH_DEFAULT}"
 CONTROLLERS_PATH="${CONTROLLERS_PATH:-$CONTROLLERS_PATH_DEFAULT}"
+ATTACH_TMUX="${ATTACH_TMUX:-0}"
+ISAAC_APP_ARGS="${ISAAC_APP_ARGS:-}"
+
+require_command() {
+  local name="$1"
+  local install_hint="$2"
+  if ! command -v "$name" >/dev/null 2>&1; then
+    echo "[ERROR] required command not found: $name" >&2
+    echo "[HINT] $install_hint" >&2
+    return 1
+  fi
+}
+
+require_command "tmux" "Install tmux, for example: sudo apt install tmux"
+require_command "tmuxp" "Install tmuxp, for example: python3 -m pip install --user tmuxp"
 
 wait_for_session_start() {
   local waited=0
@@ -33,6 +48,14 @@ wait_for_session_end() {
   while tmux has-session -t "$SESSION_NAME" 2>/dev/null; do
     sleep 1
   done
+}
+
+load_tmuxp_session() {
+  if [ "$ATTACH_TMUX" = "1" ]; then
+    tmuxp load -y experiments/tmuxp/m8_disturb.yaml
+  else
+    tmuxp load -d -y experiments/tmuxp/m8_disturb.yaml
+  fi
 }
 
 run_once() {
@@ -56,10 +79,17 @@ run_once() {
     POST_DIST_CAPTURE_SEC="$POST_DIST_CAPTURE_SEC" \
     POST_FALL_CAPTURE_SEC="$POST_FALL_CAPTURE_SEC" \
     AUTO_KILL_AFTER_CAPTURE="$AUTO_KILL_AFTER_CAPTURE" \
-    tmuxp load -d -y ops/tmuxp/m8_disturb.yaml
+    ISAAC_APP_ARGS="$ISAAC_APP_ARGS" \
+    load_tmuxp_session
   )
-  wait_for_session_start
-  wait_for_session_end
+  if [ "$ATTACH_TMUX" = "1" ]; then
+    if tmux has-session -t "$SESSION_NAME" 2>/dev/null; then
+      wait_for_session_end
+    fi
+  else
+    wait_for_session_start
+    wait_for_session_end
+  fi
 }
 
 run_once "balance_off" "false"

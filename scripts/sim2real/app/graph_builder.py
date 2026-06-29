@@ -41,6 +41,40 @@ def stage_has_prim(path: str) -> bool:
         return False
 
 
+def enable_extension_compat(extension_name: str) -> None:
+    """Enable an Isaac/Kit extension across Isaac Sim API layouts."""
+    try:
+        from isaacsim.core.utils.extensions import enable_extension
+
+        enable_extension(extension_name)
+        return
+    except ModuleNotFoundError:
+        pass
+
+    try:
+        import omni.kit.app
+
+        app = omni.kit.app.get_app()
+        manager = app.get_extension_manager()
+    except Exception as exc:
+        raise RuntimeError(f"failed to access Kit extension manager for {extension_name}") from exc
+
+    enable_immediate = getattr(manager, "set_extension_enabled_immediate", None)
+    if callable(enable_immediate):
+        enable_immediate(extension_name, True)
+        return
+
+    enable = getattr(manager, "set_extension_enabled", None)
+    if callable(enable):
+        enable(extension_name, True)
+        update = getattr(app, "update", None)
+        if callable(update):
+            update()
+        return
+
+    raise RuntimeError(f"failed to enable extension: {extension_name}")
+
+
 def find_descendant_prim(root_path: str, prim_name: str) -> str | None:
     """root_path 하위에서 basename이 prim_name인 prim을 찾는다."""
     try:
@@ -163,6 +197,7 @@ class GraphRuntimeConfig:
     tick_only_playback: bool
     tick_frame_period: int
     bridge_extension: str
+    command_apply_backend: str
 
 
 def resolve_graph_runtime_config(phase_cfg: dict[str, Any]) -> GraphRuntimeConfig:
@@ -203,6 +238,7 @@ def resolve_graph_runtime_config(phase_cfg: dict[str, Any]) -> GraphRuntimeConfi
         tick_only_playback=bool(graph_cfg.get("tick_only_playback", False)),
         tick_frame_period=int(graph_cfg.get("tick_frame_period", 0)),
         bridge_extension=str(phase_cfg.get("bridge_extension", "isaacsim.ros2.bridge")),
+        command_apply_backend=str(graph_cfg.get("command_apply_backend", "python")).lower(),
     )
 
 
@@ -260,12 +296,9 @@ def build_sensor_graph(
 
     frame_imu = cfg.frame_imu
     try:
-        try:
-            from isaacsim.core.utils.extensions import enable_extension
-        except ModuleNotFoundError:
-            from omni.isaac.core.utils.extensions import enable_extension
-
-        enable_extension(cfg.bridge_extension)
+        enable_extension_compat(cfg.bridge_extension)
+        enable_extension_compat("isaacsim.ros2.nodes")
+        enable_extension_compat("isaacsim.sensors.physics.nodes")
 
         import omni.graph.core as og
 
@@ -289,27 +322,35 @@ def build_sensor_graph(
             ("Context", "isaacsim.ros2.bridge.ROS2Context"),
             ("ReadTime", "isaacsim.core.nodes.IsaacReadSimulationTime"),
             ("ClockPub", "isaacsim.ros2.bridge.ROS2PublishClock"),
+            ("JointStateRead", "isaacsim.sensors.physics.IsaacReadJointState"),
             ("JointStatePub", "isaacsim.ros2.bridge.ROS2PublishJointState"),
             ("OdomCompute", "isaacsim.core.nodes.IsaacComputeOdometry"),
             ("ImuPub", "isaacsim.ros2.bridge.ROS2PublishImu"),
         ]
         connect_edges: list[tuple[str, str]] = [
             (f"Tick.{cfg.tick_output_port}", "ClockPub.inputs:execIn"),
-            (f"Tick.{cfg.tick_output_port}", "JointStatePub.inputs:execIn"),
+            (f"Tick.{cfg.tick_output_port}", "JointStateRead.inputs:execIn"),
+            ("JointStateRead.outputs:execOut", "JointStatePub.inputs:execIn"),
             (f"Tick.{cfg.tick_output_port}", "OdomCompute.inputs:execIn"),
             (f"Tick.{cfg.tick_output_port}", "ImuPub.inputs:execIn"),
             ("Context.outputs:context", "ClockPub.inputs:context"),
             ("Context.outputs:context", "JointStatePub.inputs:context"),
             ("Context.outputs:context", "ImuPub.inputs:context"),
-            ("ReadTime.outputs:simulationTime", "JointStatePub.inputs:timeStamp"),
             ("ReadTime.outputs:simulationTime", "ClockPub.inputs:timeStamp"),
             ("ReadTime.outputs:simulationTime", "ImuPub.inputs:timeStamp"),
+            ("JointStateRead.outputs:jointNames", "JointStatePub.inputs:jointNames"),
+            ("JointStateRead.outputs:jointPositions", "JointStatePub.inputs:jointPositions"),
+            ("JointStateRead.outputs:jointVelocities", "JointStatePub.inputs:jointVelocities"),
+            ("JointStateRead.outputs:jointEfforts", "JointStatePub.inputs:jointEfforts"),
+            ("JointStateRead.outputs:jointDofTypes", "JointStatePub.inputs:jointDofTypes"),
+            ("JointStateRead.outputs:stageMetersPerUnit", "JointStatePub.inputs:stageMetersPerUnit"),
+            ("JointStateRead.outputs:sensorTime", "JointStatePub.inputs:sensorTime"),
             ("OdomCompute.outputs:orientation", "ImuPub.inputs:orientation"),
             ("OdomCompute.outputs:angularVelocity", "ImuPub.inputs:angularVelocity"),
             ("OdomCompute.outputs:linearAcceleration", "ImuPub.inputs:linearAcceleration"),
         ]
         set_values: list[tuple[str, Any]] = [
-            ("JointStatePub.inputs:targetPrim", robot_prim),
+            ("JointStateRead.inputs:prim", robot_prim),
             ("JointStatePub.inputs:topicName", cfg.topic_joint),
             ("OdomCompute.inputs:chassisPrim", imu_prim),
             ("ImuPub.inputs:topicName", cfg.topic_imu),
@@ -319,7 +360,8 @@ def build_sensor_graph(
             ("ImuPub.inputs:publishLinearAcceleration", True),
         ]
 
-        if include_command_apply:
+        graph_command_apply = include_command_apply and cfg.command_apply_backend == "omnigraph"
+        if graph_command_apply:
             extend_with_command_apply(
                 create_nodes=create_nodes,
                 connect_edges=connect_edges,
@@ -349,7 +391,8 @@ def build_sensor_graph(
                 f" tick_node={cfg.tick_node_type} tick_output={cfg.tick_output_port}"
                 f" only_playback={cfg.tick_only_playback} frame_period={cfg.tick_frame_period}"
                 f" evaluator={cfg.evaluator_name} command_apply={include_command_apply}"
-                f" command_topic={cfg.topic_command_raw}"
+                f" command_apply_backend={cfg.command_apply_backend}"
+                f" joint_state_source=IsaacReadJointState command_topic={cfg.topic_command_raw}"
             ),
         )
     except Exception as exc:

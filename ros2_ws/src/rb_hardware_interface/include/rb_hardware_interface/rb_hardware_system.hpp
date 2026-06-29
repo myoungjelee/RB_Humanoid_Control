@@ -8,8 +8,8 @@
 #include <vector>
 #include <mutex>
 
-#include "hardware_interface/hardware_info.hpp"
 #include "hardware_interface/system_interface.hpp"
+#include "hardware_interface/types/hardware_component_interface_params.hpp"
 #include "hardware_interface/types/hardware_interface_return_values.hpp"
 #include "rclcpp/executors/single_threaded_executor.hpp"
 #include "sensor_msgs/msg/joint_state.hpp"
@@ -26,7 +26,8 @@ namespace rb_hardware_interface
   class RBHardwareSystem : public hardware_interface::SystemInterface
   {
   public:
-    CallbackReturn on_init(const hardware_interface::HardwareInfo &info) override;
+    CallbackReturn on_init(
+      const hardware_interface::HardwareComponentInterfaceParams &params) override;
 
     CallbackReturn on_configure(const rclcpp_lifecycle::State &previous_state) override;
 

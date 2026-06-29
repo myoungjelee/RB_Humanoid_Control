@@ -10,7 +10,7 @@ windows:
     panes:
       - shell_command:
           - cd /home/leemou/Projects/RB_Humanoid_Control
-          - python main.py --phase m5_pose_audit 2>&1 | tee "$BASE/m5/isaac.log"
+          - bash tools/isaac_python.sh main.py --phase m5_pose_audit 2>&1 | tee "$BASE/m5/isaac.log"
       - shell_command:
           - echo "[INFO] pose audit mode"
           - echo "[INFO] timeline starts paused, controller is not launched"

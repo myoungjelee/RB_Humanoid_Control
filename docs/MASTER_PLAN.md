@@ -296,7 +296,8 @@ controller-only no-disturbance standing 확보
 출력 구조
 
 - `logs/sim2real/<milestone>/<run_id>/`
-- `reports/sim2real/`
+- `docs/sim2real/`
+- `docs/assets/sim2real/images/`
 - `artifacts/`
 
 핵심 질문

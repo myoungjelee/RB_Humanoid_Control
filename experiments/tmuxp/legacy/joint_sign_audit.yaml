@@ -10,16 +10,16 @@ windows:
     panes:
       - shell_command:
           - cd /home/leemou/Projects/RB_Humanoid_Control
-          - python main.py --phase m3_command 2>&1 | tee "$BASE/sign/isaac.log"
+          - bash tools/isaac_python.sh main.py --phase m3_command 2>&1 | tee "$BASE/sign/isaac.log"
       - shell_command:
           - cd /home/leemou/Projects/RB_Humanoid_Control/ros2_ws
-          - source /opt/ros/humble/setup.bash
+          - source "/opt/ros/${ROS_DISTRO:-jazzy}/setup.bash"
           - source install/setup.bash
           - until timeout 1 ros2 topic echo --once /clock >/dev/null 2>&1; do echo "[WAIT] /clock not ready yet"; sleep 1; done
           - ros2 launch rb_controller controller.launch.py params_file:=/home/leemou/Projects/RB_Humanoid_Control/ros2_ws/src/rb_controller/config/scenarios/joint_sign_audit.yaml 2>&1 | tee "$BASE/sign/launch.log"
       - shell_command:
           - cd /home/leemou/Projects/RB_Humanoid_Control/ros2_ws
-          - source /opt/ros/humble/setup.bash
+          - source "/opt/ros/${ROS_DISTRO:-jazzy}/setup.bash"
           - source install/setup.bash
           - export TARGET_JOINT="${TARGET_JOINT:-left_hip_pitch_joint}"
           - export STEP_AMP="${STEP_AMP:-1.0}"

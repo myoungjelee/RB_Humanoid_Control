@@ -10,10 +10,10 @@ windows:
     panes:
       - shell_command:
           - cd /home/leemou/Projects/RB_Humanoid_Control
-          - timeout 30 python main.py --phase m5_stand 2>&1 | tee "$BASE/m4/timeout/isaac.log"
+          - timeout 30 bash tools/isaac_python.sh main.py --phase m5_stand 2>&1 | tee "$BASE/m4/timeout/isaac.log"
       - shell_command:
           - cd /home/leemou/Projects/RB_Humanoid_Control/ros2_ws
-          - source /opt/ros/humble/setup.bash
+          - source "/opt/ros/${ROS_DISTRO:-jazzy}/setup.bash"
           - source install/setup.bash
           - echo "[WAIT] sleeping 15s for Isaac startup"
           - sleep 15

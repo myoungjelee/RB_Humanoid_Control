@@ -39,12 +39,12 @@ termination/failure mode를 재현 가능하게 기록하는 검증 단계다.
 - `logs/stage1/videos/rough_zero_trim.mp4`
 
 ### 4.3 Images
-- `reports/stage1/images/flat_zero.png`
-- `reports/stage1/images/rough_zero.png`
+- `docs/assets/stage1/images/flat_zero.png`
+- `docs/assets/stage1/images/rough_zero.png`
 
 ### 4.4 Figures (pending)
-- `reports/stage1/figures/pd_sweep.png`
-- `reports/stage1/figures/freq_sweep.png`
+- `docs/assets/stage1/figures/pd_sweep.png`
+- `docs/assets/stage1/figures/freq_sweep.png`
 
 ## 5) 실험 설계 노트
 - Mode 정의:
@@ -69,5 +69,5 @@ python scripts/stage1/run_stage1.py --task rough --mode pose --steps 200
 
 ## 7) 다음 단계
 1. pose-hold(Flat/Rough) 결과를 동일 표에 채워 zero 대비 개선폭 확정.
-2. PD/frequency sweep 스크립트 결과를 `reports/stage1/figures/`에 연결.
+2. PD/frequency sweep 스크립트 결과를 `docs/assets/stage1/figures/`에 연결.
 3. disturbance recovery 결과까지 추가해 Stage1 패키지 완성.

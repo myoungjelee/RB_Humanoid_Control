@@ -1,6 +1,6 @@
 # RB_Humanoid_Control
 
-Isaac Sim 5.1 + ROS2 Humble 기반으로, 휴머노이드 제어 경로를
+Isaac Sim 6.0 + ROS2 Jazzy 기반으로, 휴머노이드 제어 경로를
 `센서 -> 상태추정 -> 제어 -> 안전 -> 로그/KPI` 구조로 설계하고 검증한 Sim-to-Real 포트폴리오 프로젝트입니다.
 
 핵심 목표는 "시뮬에서만 잠깐 도는 데모"가 아니라,
@@ -34,11 +34,23 @@ Isaac Sim 5.1 + ROS2 Humble 기반으로, 휴머노이드 제어 경로를
 - `imu_frame_mode=g1_imu_link`: observer-side IMU frame correction
 - Stage1 baseline과 Sim2Real main track 분리 운영
 
+## 저장소 구조
+
+- `docs/`: 공개 문서, 로드맵, 결과 문서
+- `docs/assets/`: README와 docs에서 쓰는 이미지/figure 증빙 자산
+- `experiments/`: tmuxp 세션, 실행 profile, M8/M9 실험 wrapper
+- `logs/`: 선별해 남긴 실험 결과와 KPI 산출물
+- `ros2_ws/`: ROS2 Jazzy 패키지와 launch/config/URDF
+- `scripts/`: Isaac/Sim2Real/Stage1 실행 및 후처리 Python 도구
+- `source/`: Isaac Lab extension 패키지
+- `rb_utils/`: Isaac Lab 실험 공통 Python 유틸리티
+- `tools/`: 개발/환경 점검 보조 스크립트
+
 ## 시스템 구조
 
 아래 구조를 기준으로 `센서 / 상태추정 / 제어 / 안전 / KPI`를 한 흐름으로 연결했습니다.
 
-![System Architecture](reports/sim2real/images/standalone_backend/system_architecture.png)
+![System Architecture](docs/assets/sim2real/images/standalone_backend/system_architecture.png)
 
 - `Isaac Sim -> ROS2 sensor interface -> State Estimation -> Standing Controller Plugin -> command_raw -> Safety Layer -> command_safe -> Simulator/Hardware -> logs/KPI` 흐름으로 구성했습니다.
 - 현재 제어 실행 경로는 `controller_manager` 기반 `ros2_control` 구조로 정리되어 있습니다.
@@ -46,7 +58,7 @@ Isaac Sim 5.1 + ROS2 Humble 기반으로, 휴머노이드 제어 경로를
 
 ## 고정한 엔지니어링 결정
 
-- Isaac Sim 5.1 / ROS2 Humble / Ubuntu 22.04
+- Isaac Sim 6.0 / ROS2 Jazzy / Ubuntu 24.04
 - Command mode: `effort`
 - Namespace: `/clock` + `/rb/*`
 - Timing: `control_rate_hz=200`, `sim.dt=0.005`, `substeps=1`, `decimation=1`
@@ -77,13 +89,13 @@ Isaac Sim 5.1 + ROS2 Humble 기반으로, 휴머노이드 제어 경로를
 
 | 단계 | 무엇을 했는가                                       | 무엇으로 검증했는가                                                   | 증빙                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | ---- | --------------------------------------------------- | --------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| M1   | `/clock`, `/rb/joint_states`, `/rb/imu` 브리지 확인 | topic publish 확인                                                    | [m1_standalone.png](reports/sim2real/images/standalone_backend/m1_standalone.png)                                                                                                                                                                                                                                                                                                                                                                                                                                         |
-| M2   | 초기 C++ controller node 200Hz loop, dt/jitter 출력 | `/rb/command_raw`, `dt_mean/p95/max`                                  | [m2_controller_standalone.png](reports/sim2real/images/standalone_backend/m2_controller_standalone.png)                                                                                                                                                                                                                                                                                                                                                                                                                   |
-| M3   | command apply 경로 연결                             | `joint_states` before/after 변화                                      | [m3_command_standalone.png](reports/sim2real/images/standalone_backend/m3_command_standalone.png)                                                                                                                                                                                                                                                                                                                                                                                                                         |
-| M4   | safety gating 구조 정리                             | `CLAMP`, `JOINT_LIMIT`, `TIMEOUT`, `TILT`, `VELOCITY_LIMIT` 개별 증빙 | [m4_clamp_standalone.png](reports/sim2real/images/standalone_backend/m4_clamp_standalone.png), [m4_joint_limit_standalone.png](reports/sim2real/images/standalone_backend/m4_joint_limit_standalone.png), [m4_timeout_standalone.png](reports/sim2real/images/standalone_backend/m4_timeout_standalone.png), [m4_tilt_standalone.png](reports/sim2real/images/standalone_backend/m4_tilt_standalone.png), [m4_velocity_limit_standalone.png](reports/sim2real/images/standalone_backend/m4_velocity_limit_standalone.png) |
-| M5   | controller-only standing hold 확보, 실패 원인 분리  | `fall_event`, `sync_markers`, `loop_stats`, GUI 관찰                  | [fall_event.txt](logs/sim2real/m5/20260314-121949_m5_stand_sanity_qrefv7/m5/fall_event.txt), [sync_markers.txt](logs/sim2real/m5/20260314-121949_m5_stand_sanity_qrefv7/m5/sync_markers.txt), [loop_post_sync.txt](logs/sim2real/m5/20260314-121949_m5_stand_sanity_qrefv7/m5/loop_post_sync.txt), [overview.md](reports/sim2real/overview.md)                                                                                                                                                                                                                         |
-| M7   | safety-on standing 재통합                           | `NO_FALL_EVENT`, `NO_SAFETY_REASON`, `CONTROL_ACTIVE` 기준 60초 hold  | [fall_event.txt](logs/sim2real/m7/20260314-133954_m7_stand_safecheck/m7/fall_event.txt), [reason_count.txt](logs/sim2real/m7/20260314-133954_m7_stand_safecheck/m7/reason_count.txt), [sync_markers.txt](logs/sim2real/m7/20260314-133954_m7_stand_safecheck/m7/sync_markers.txt), [m7_t0.png](reports/sim2real/images/standalone_backend/m7_t0.png), [m7_t60.png](reports/sim2real/images/standalone_backend/m7_t60.png)                                                                                                                                       |
-| M8   | 같은 외란에서 balance feedback OFF/ON 비교          | `fall_event`, `disturb_kpi`, 대표 still 이미지, split-screen 영상     | [20260314-184316](logs/sim2real/m8/20260314-184316/), [20260314-184442](logs/sim2real/m8/20260314-184442/), [20260314-184609](logs/sim2real/m8/20260314-184609/), [m8_disturb_tilted.png](reports/sim2real/images/standalone_backend/m8_disturb_tilted.png), [m8_disturb_recovered.png](reports/sim2real/images/standalone_backend/m8_disturb_recovered.png)                                                                                                                                                           |
+| M1   | `/clock`, `/rb/joint_states`, `/rb/imu` 브리지 확인 | topic publish 확인                                                    | [m1_standalone.png](docs/assets/sim2real/images/standalone_backend/m1_standalone.png)                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| M2   | 초기 C++ controller node 200Hz loop, dt/jitter 출력 | `/rb/command_raw`, `dt_mean/p95/max`                                  | [m2_controller_standalone.png](docs/assets/sim2real/images/standalone_backend/m2_controller_standalone.png)                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| M3   | command apply 경로 연결                             | `joint_states` before/after 변화                                      | [m3_command_standalone.png](docs/assets/sim2real/images/standalone_backend/m3_command_standalone.png)                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| M4   | safety gating 구조 정리                             | `CLAMP`, `JOINT_LIMIT`, `TIMEOUT`, `TILT`, `VELOCITY_LIMIT` 개별 증빙 | [m4_clamp_standalone.png](docs/assets/sim2real/images/standalone_backend/m4_clamp_standalone.png), [m4_joint_limit_standalone.png](docs/assets/sim2real/images/standalone_backend/m4_joint_limit_standalone.png), [m4_timeout_standalone.png](docs/assets/sim2real/images/standalone_backend/m4_timeout_standalone.png), [m4_tilt_standalone.png](docs/assets/sim2real/images/standalone_backend/m4_tilt_standalone.png), [m4_velocity_limit_standalone.png](docs/assets/sim2real/images/standalone_backend/m4_velocity_limit_standalone.png) |
+| M5   | controller-only standing hold 확보, 실패 원인 분리  | `fall_event`, `sync_markers`, `loop_stats`, GUI 관찰                  | [fall_event.txt](logs/sim2real/m5/20260314-121949_m5_stand_sanity_qrefv7/m5/fall_event.txt), [sync_markers.txt](logs/sim2real/m5/20260314-121949_m5_stand_sanity_qrefv7/m5/sync_markers.txt), [loop_post_sync.txt](logs/sim2real/m5/20260314-121949_m5_stand_sanity_qrefv7/m5/loop_post_sync.txt), [overview.md](docs/sim2real/overview.md)                                                                                                                                                                                                                         |
+| M7   | safety-on standing 재통합                           | `NO_FALL_EVENT`, `NO_SAFETY_REASON`, `CONTROL_ACTIVE` 기준 60초 hold  | [fall_event.txt](logs/sim2real/m7/20260314-133954_m7_stand_safecheck/m7/fall_event.txt), [reason_count.txt](logs/sim2real/m7/20260314-133954_m7_stand_safecheck/m7/reason_count.txt), [sync_markers.txt](logs/sim2real/m7/20260314-133954_m7_stand_safecheck/m7/sync_markers.txt), [m7_t0.png](docs/assets/sim2real/images/standalone_backend/m7_t0.png), [m7_t60.png](docs/assets/sim2real/images/standalone_backend/m7_t60.png)                                                                                                                                       |
+| M8   | 같은 외란에서 balance feedback OFF/ON 비교          | `fall_event`, `disturb_kpi`, 대표 still 이미지, split-screen 영상     | [20260314-184316](logs/sim2real/m8/20260314-184316/), [20260314-184442](logs/sim2real/m8/20260314-184442/), [20260314-184609](logs/sim2real/m8/20260314-184609/), [m8_disturb_tilted.png](docs/assets/sim2real/images/standalone_backend/m8_disturb_tilted.png), [m8_disturb_recovered.png](docs/assets/sim2real/images/standalone_backend/m8_disturb_recovered.png)                                                                                                                                                           |
 | M9   | M8 결과 자동 요약/비교                              | `kpi.json`, `comparison.json`, `summary.md`, `m9/index.csv`           | [summary.md](logs/sim2real/m9/20260315-000113/summary.md), [comparison.json](logs/sim2real/m9/20260315-000113/comparison.json), [balance_off_kpi.json](logs/sim2real/m9/20260315-000113/balance_off_kpi.json), [balance_on_kpi.json](logs/sim2real/m9/20260315-000113/balance_on_kpi.json), [m9/index.csv](logs/sim2real/m9/index.csv)                                                                                                                                                                                 |
 
 ## M5에서 실제로 해결한 문제
@@ -98,7 +110,7 @@ raw IMU/bias/tilt observability를 추가해서 보니, 실제 forward fall 정�
 
 아래 그림의 왼쪽은 **현재 검증 완료 범위**, 오른쪽은 **이후 engineering 확장 단계**입니다.
 
-![Validated Scope And Next Steps](reports/sim2real/images/standalone_backend/milestone_roadview.png)
+![Validated Scope And Next Steps](docs/assets/sim2real/images/standalone_backend/milestone_roadview.png)
 
 - 현재 검증 완료 범위:
   - `M1~M4 pipeline validation`
@@ -128,10 +140,8 @@ https://github.com/user-attachments/assets/4e70156b-aca6-4c3a-859f-7526fa2f511e
 
 ### 문서
 
-- 랜딩 요약: [reports/sim2real/ONE_PAGER.md](reports/sim2real/ONE_PAGER.md)
-- 기술 복기: [reports/sim2real/overview.md](reports/sim2real/overview.md)
-- 현재 작업 로그: [STATUS.md](STATUS.md)
-- 전체 로드맵: [MASTER_PLAN.md](MASTER_PLAN.md)
+- Sim-to-Real 기술 복기: [docs/sim2real/overview.md](docs/sim2real/overview.md)
+- 전체 로드맵: [docs/MASTER_PLAN.md](docs/MASTER_PLAN.md)
 
 ### 대표 로그 아티팩트
 
@@ -178,5 +188,4 @@ https://github.com/user-attachments/assets/4e70156b-aca6-4c3a-859f-7526fa2f511e
 
 ## Baseline / Archive
 
-- Stage1 overview: [reports/stage1/overview.md](reports/stage1/overview.md)
-- Stage1 one-pager: [reports/stage1/ONE_PAGER.md](reports/stage1/ONE_PAGER.md)
+- Stage1 overview: [docs/stage1/overview.md](docs/stage1/overview.md)

@@ -13,11 +13,11 @@ windows:
     panes:
       - shell_command:
           - cd /home/leemou/Projects/RB_Humanoid_Control
-          # - python main.py --phase m5_stand 2>&1 | tee "$BASE/m5/isaac.log"
-          - python main.py --phase m5_stand --headless 2>&1 | tee "$BASE/m5/isaac.log"
+          # - bash tools/isaac_python.sh main.py --phase m5_stand 2>&1 | tee "$BASE/m5/isaac.log"
+          - bash tools/isaac_python.sh main.py --phase m5_stand --headless 2>&1 | tee "$BASE/m5/isaac.log"
       - shell_command:
           - cd /home/leemou/Projects/RB_Humanoid_Control/ros2_ws
-          - source /opt/ros/humble/setup.bash
+          - source "/opt/ros/${ROS_DISTRO:-jazzy}/setup.bash"
           - source install/setup.bash
           - echo "[RUN] launching controller immediately; sync markers will align analysis later"
           - timeout "$CAPTURE_MAX_SEC" ros2 launch rb_controller controller.launch.py params_file:=/home/leemou/Projects/RB_Humanoid_Control/ros2_ws/src/rb_controller/config/scenarios/stand_pd_sanity.yaml 2>&1 | tee "$BASE/m5/m5_stand_sanity.log"

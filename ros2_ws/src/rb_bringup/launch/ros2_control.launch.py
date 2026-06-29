@@ -60,8 +60,8 @@ def generate_launch_description() -> LaunchDescription:
         output="screen",
         parameters=[
             {"robot_description": robot_description},
-            # Humble 환경에서는 controller_manager가 sim time을 직접 물고 있을 때
-            # load_controller 경로가 멈추는 현상이 있어, 여기서는 별도 arg로 분리한다.
+            # controller_manager는 launch/spawner 경로 안정성을 위해 wall time을 기본값으로 둔다.
+            # 주변 sim 노드는 use_sim_time으로 /clock을 계속 사용한다.
             {"use_sim_time": controller_manager_use_sim_time},
             controllers_file,
             {
@@ -124,7 +124,7 @@ def generate_launch_description() -> LaunchDescription:
             DeclareLaunchArgument(
                 "controller_manager_use_sim_time",
                 default_value="false",
-                description="Keep controller_manager on wall time by default. In current Humble setup, load_controller hangs when this is true.",
+                description="Keep controller_manager on wall time by default while sim-facing nodes use /clock.",
             ),
             DeclareLaunchArgument(
                 "start_joint_state_broadcaster",

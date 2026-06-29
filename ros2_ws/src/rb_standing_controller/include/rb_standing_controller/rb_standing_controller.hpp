@@ -93,7 +93,7 @@ private:
   double compute_stand_output_scale(const EstimatedStateInput & estimated_state);
   bool compute_tilt_feedback_command(
     const EstimatedStateInput & estimated_state, TiltFeedbackCommand & cmd) const;
-  void apply_tilt_feedback_effort(
+  bool apply_tilt_feedback_effort(
     const TiltFeedbackCommand & tilt_cmd, std::size_t usable_count);
   void apply_tilt_feedback_qref_bias(
     std::vector<double> & effective_q_ref, const TiltFeedbackCommand & tilt_cmd) const;

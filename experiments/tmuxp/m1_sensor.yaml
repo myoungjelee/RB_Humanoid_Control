@@ -10,10 +10,10 @@ windows:
     panes:
       - shell_command:
           - cd /home/leemou/Projects/RB_Humanoid_Control
-          - python main.py --phase m1_sensor 2>&1 | tee "$BASE/m1/isaac.log"
+          - bash tools/isaac_python.sh main.py --phase m1_sensor 2>&1 | tee "$BASE/m1/isaac.log"
       - shell_command:
           - cd /home/leemou/Projects/RB_Humanoid_Control/ros2_ws
-          - source /opt/ros/humble/setup.bash
+          - source "/opt/ros/${ROS_DISTRO:-jazzy}/setup.bash"
           - source install/setup.bash
           - echo "[WAIT] sleeping 15s for Isaac startup"
           - sleep 15
@@ -23,7 +23,7 @@ windows:
           - exec bash
       - shell_command:
           - cd /home/leemou/Projects/RB_Humanoid_Control/ros2_ws
-          - source /opt/ros/humble/setup.bash
+          - source "/opt/ros/${ROS_DISTRO:-jazzy}/setup.bash"
           - source install/setup.bash
           - echo "[WAIT] sleeping 15s for Isaac startup"
           - sleep 15

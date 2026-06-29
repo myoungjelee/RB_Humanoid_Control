@@ -4,6 +4,7 @@
 #include <cmath>
 #include <cstdint>
 #include <limits>
+#include <optional>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
@@ -677,7 +678,7 @@ void RBStandingController::zero_all_commands()
 {
   for (auto & command_interface : command_interfaces_)
   {
-    command_interface.set_value(0.0);
+    (void)command_interface.set_value(0.0);
   }
 }
 
@@ -692,8 +693,16 @@ bool RBStandingController::build_current_state_vectors()
 
   for (std::size_t i = 0; i < joint_names_.size(); ++i)
   {
-    current_positions_[i] = state_interfaces_[static_cast<std::size_t>(position_state_indices_[i])].get_value();
-    current_velocities_[i] = state_interfaces_[static_cast<std::size_t>(velocity_state_indices_[i])].get_value();
+    const auto position =
+      state_interfaces_[static_cast<std::size_t>(position_state_indices_[i])].get_optional<double>();
+    const auto velocity =
+      state_interfaces_[static_cast<std::size_t>(velocity_state_indices_[i])].get_optional<double>();
+    if (!position.has_value() || !velocity.has_value())
+    {
+      return false;
+    }
+    current_positions_[i] = position.value();
+    current_velocities_[i] = velocity.value();
   }
   return true;
 }
@@ -1004,7 +1013,7 @@ bool RBStandingController::compute_tilt_feedback_command(
   return true;
 }
 
-void RBStandingController::apply_tilt_feedback_effort(
+bool RBStandingController::apply_tilt_feedback_effort(
   const TiltFeedbackCommand & tilt_cmd, std::size_t usable_count)
 {
   // effort mode는 기본 stand_pd effort를 만든 뒤 마지막에 additive effort만 더한다.
@@ -1012,36 +1021,41 @@ void RBStandingController::apply_tilt_feedback_effort(
     {
       if (idx < 0)
       {
-        return;
+        return true;
       }
       const std::size_t joint_idx = static_cast<std::size_t>(idx);
       if (joint_idx >= usable_count || stand_control_mask_[joint_idx] == 0U)
       {
-        return;
+        return true;
       }
       auto & command_interface =
         command_interfaces_[static_cast<std::size_t>(command_interface_indices_[joint_idx])];
-      double value = command_interface.get_value() + delta;
+      const auto current_value = command_interface.get_optional<double>();
+      if (!current_value.has_value())
+      {
+        return false;
+      }
+      double value = current_value.value() + delta;
       if (stand_effort_abs_max_ > 0.0)
       {
         value = std::clamp(value, -stand_effort_abs_max_, stand_effort_abs_max_);
       }
-      command_interface.set_value(value);
+      return command_interface.set_value(value);
     };
 
-  add_effort(idx_left_hip_roll_, +tilt_cmd.u_roll * tilt_cmd.roll_w_hip);
-  add_effort(idx_right_hip_roll_, -tilt_cmd.u_roll * tilt_cmd.roll_w_hip);
-  add_effort(idx_left_ankle_roll_, +tilt_cmd.u_roll * tilt_cmd.roll_w_ankle);
-  add_effort(idx_right_ankle_roll_, -tilt_cmd.u_roll * tilt_cmd.roll_w_ankle);
-  add_effort(idx_torso_, +tilt_cmd.u_roll * tilt_cmd.roll_w_torso);
-
-  add_effort(idx_left_hip_pitch_, +tilt_cmd.u_pitch * tilt_cmd.pitch_w_hip);
-  add_effort(idx_right_hip_pitch_, +tilt_cmd.u_pitch * tilt_cmd.pitch_w_hip);
-  add_effort(idx_left_ankle_pitch_, +tilt_cmd.u_pitch * tilt_cmd.pitch_w_ankle);
-  add_effort(idx_right_ankle_pitch_, +tilt_cmd.u_pitch * tilt_cmd.pitch_w_ankle);
-  add_effort(idx_left_knee_, +tilt_cmd.u_pitch * tilt_cmd.pitch_w_knee);
-  add_effort(idx_right_knee_, +tilt_cmd.u_pitch * tilt_cmd.pitch_w_knee);
-  add_effort(idx_torso_, +tilt_cmd.u_pitch * tilt_cmd.pitch_w_torso);
+  return
+    add_effort(idx_left_hip_roll_, +tilt_cmd.u_roll * tilt_cmd.roll_w_hip) &&
+    add_effort(idx_right_hip_roll_, -tilt_cmd.u_roll * tilt_cmd.roll_w_hip) &&
+    add_effort(idx_left_ankle_roll_, +tilt_cmd.u_roll * tilt_cmd.roll_w_ankle) &&
+    add_effort(idx_right_ankle_roll_, -tilt_cmd.u_roll * tilt_cmd.roll_w_ankle) &&
+    add_effort(idx_torso_, +tilt_cmd.u_roll * tilt_cmd.roll_w_torso) &&
+    add_effort(idx_left_hip_pitch_, +tilt_cmd.u_pitch * tilt_cmd.pitch_w_hip) &&
+    add_effort(idx_right_hip_pitch_, +tilt_cmd.u_pitch * tilt_cmd.pitch_w_hip) &&
+    add_effort(idx_left_ankle_pitch_, +tilt_cmd.u_pitch * tilt_cmd.pitch_w_ankle) &&
+    add_effort(idx_right_ankle_pitch_, +tilt_cmd.u_pitch * tilt_cmd.pitch_w_ankle) &&
+    add_effort(idx_left_knee_, +tilt_cmd.u_pitch * tilt_cmd.pitch_w_knee) &&
+    add_effort(idx_right_knee_, +tilt_cmd.u_pitch * tilt_cmd.pitch_w_knee) &&
+    add_effort(idx_torso_, +tilt_cmd.u_pitch * tilt_cmd.pitch_w_torso);
 }
 
 void RBStandingController::apply_tilt_feedback_qref_bias(
@@ -1175,13 +1189,19 @@ controller_interface::return_type RBStandingController::update(
     {
       effort_cmd = std::clamp(effort_cmd, -stand_effort_abs_max_, stand_effort_abs_max_);
     }
-    command_interfaces_[static_cast<std::size_t>(command_interface_indices_[i])].set_value(effort_cmd);
+    if (!command_interfaces_[static_cast<std::size_t>(command_interface_indices_[i])].set_value(effort_cmd))
+    {
+      return controller_interface::return_type::ERROR;
+    }
   }
 
   if (has_tilt_cmd && tilt_apply_mode_ == "effort")
   {
     // effort 모드는 기본 PD 결과를 만든 뒤 마지막에 additive effort로 얹는다.
-    apply_tilt_feedback_effort(tilt_cmd, joint_names_.size());
+    if (!apply_tilt_feedback_effort(tilt_cmd, joint_names_.size()))
+    {
+      return controller_interface::return_type::ERROR;
+    }
   }
 
   return controller_interface::return_type::OK;

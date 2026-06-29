@@ -75,7 +75,7 @@ tests/
 **/gelsight_r15_data/*
 
 # Local-only agent/plan notes (Codex guardrails)
-docs/
+AGENTS.md
 
 # Stage1 experiment artifacts policy:
 # - keep raw logs untracked
@@ -158,5 +158,6 @@ ros2_ws/install/
 ros2_ws/log/
 
 # Docs
-reviews/
+docs/reviews/
 .envrc
+STATUS.md
