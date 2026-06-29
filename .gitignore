@@ -159,3 +159,4 @@ ros2_ws/log/
 
 # Docs
 reviews/
+.envrc
