@@ -156,3 +156,7 @@ logs/sim2real/m9/20260315-000113/*
 ros2_ws/build/
 ros2_ws/install/
 ros2_ws/log/
+
+# Docs
+reviews/
+.envrc
